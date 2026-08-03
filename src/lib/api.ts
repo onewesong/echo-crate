@@ -1,9 +1,11 @@
 import type { Playlist, ProviderProfile, Track } from "../types";
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const headers = new Headers(options?.headers);
+  if (options?.body && !headers.has("content-type")) headers.set("content-type", "application/json");
   const response = await fetch(url, {
     ...options,
-    headers: { "content-type": "application/json", ...options?.headers },
+    headers,
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `请求失败 (${response.status})`);
