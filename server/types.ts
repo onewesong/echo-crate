@@ -35,9 +35,20 @@ export type ProviderProfile = {
   name: string;
   description: string;
   connected: boolean;
-  capabilities: Array<"import" | "stream" | "lyrics" | "login">;
+  capabilities: Array<"import" | "stream" | "lyrics" | "login" | "search">;
   profile?: { name: string; avatar?: string; id?: string | number } | null;
 };
+
+export type SearchTrack = {
+  provider: string;
+  title: string;
+  artist: string;
+  cover: string;
+  duration: number;
+  source: SourceRef;
+};
+
+export type RemoteTrack = SearchTrack & { id: string; token: string; kind: "remote"; favorite: false; status: "available" };
 
 export type BiliVideo = {
   bvid: string;

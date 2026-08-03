@@ -9,13 +9,15 @@ import {
 import { api } from "./lib/api";
 import { cleanupStorage, downloadTrack, pauseDownload, prebufferTrack, removeDownload } from "./lib/downloads";
 import { getDownloads, saveDownload } from "./lib/idb";
-import type { DownloadRecord, Playlist, ProviderProfile, RepeatMode, Tab, Track } from "./types";
+import type { DownloadRecord, Playlist, PlayableTrack, ProviderProfile, RemoteTrack, RepeatMode, Tab, Track } from "./types";
 
 type LibrarySnapshot = { tracks: Track[]; playlists: Playlist[] };
 type Profile = { name: string; avatar?: string; id?: string | number };
 
 const EMPTY_LIBRARY: LibrarySnapshot = { tracks: [], playlists: [] };
 const ACCENT = ["#ff7a59", "#7c5cff", "#25c6a0", "#f4bd4f", "#ee5c8a", "#4898ff"];
+const isRemoteTrack = (track: PlayableTrack): track is RemoteTrack => "kind" in track && track.kind === "remote";
+const trackKey = (track: PlayableTrack) => isRemoteTrack(track) ? `remote:${track.token}` : `library:${track.id}`;
 
 function fmt(seconds: number) {
   if (!Number.isFinite(seconds)) return "0:00";
@@ -29,7 +31,7 @@ function bytes(value: number) {
   return `${(value / 1024 ** 2).toFixed(value > 1024 ** 3 ? 0 : 1)} MB`;
 }
 
-function coverStyle(track?: Track | Playlist, index = 0) {
+function coverStyle(track?: Pick<PlayableTrack, "cover"> | Playlist, index = 0) {
   const cover = track?.cover;
   return cover
     ? { backgroundImage: `linear-gradient(180deg, transparent 45%, rgba(5,4,10,.7)), url(${cover})` }
@@ -58,8 +60,8 @@ function App() {
   const savedPlayer = useMemo(() => {
     try { return JSON.parse(localStorage.getItem("echocrate.player") || localStorage.getItem("bilimusic.player") || "{}"); } catch { return {}; }
   }, []);
-  const [queue, setQueue] = useState<number[]>(savedPlayer.queue || []);
-  const [currentId, setCurrentId] = useState<number | null>(savedPlayer.currentId || null);
+  const [queue, setQueue] = useState<PlayableTrack[]>([]);
+  const [current, setCurrent] = useState<PlayableTrack | null>(null);
   const [repeat, setRepeat] = useState<RepeatMode>(savedPlayer.repeat || "off");
   const [shuffle, setShuffle] = useState(Boolean(savedPlayer.shuffle));
   const [playing, setPlaying] = useState(false);
@@ -72,7 +74,6 @@ function App() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const prebufferedTrackRef = useRef<number | null>(null);
 
-  const current = library.tracks.find((track) => track.id === currentId) || null;
   const downloadedIds = useMemo(() => new Set(downloads.filter((item) => item.status === "complete").map((item) => item.trackId)), [downloads]);
   const filteredTracks = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -115,18 +116,18 @@ function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const timer = window.setTimeout(() => localStorage.setItem("echocrate.player", JSON.stringify({ queue, currentId, repeat, shuffle, position })), 500);
+    const timer = window.setTimeout(() => localStorage.setItem("echocrate.player", JSON.stringify({ repeat, shuffle, position })), 500);
     return () => clearTimeout(timer);
-  }, [queue, currentId, repeat, shuffle, position]);
+  }, [repeat, shuffle, position]);
 
   useEffect(() => {
     if (!current) { setLyrics([]); return; }
-    void api.lyrics(current.id).then((value) => {
+    void (isRemoteTrack(current) ? api.remoteLyrics(current.token) : api.lyrics(current.id)).then((value) => {
       if (value.lines) setLyrics(value.lines);
       else if (value.content) setLyrics(parseLrc(value.content));
       else setLyrics([]);
     }).catch(() => setLyrics([]));
-  }, [current?.id]);
+  }, [current ? trackKey(current) : null]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -160,41 +161,42 @@ function App() {
     if (removed.length) { setDownloads(await getDownloads()); notify(`空间不足，已清理 ${removed.length} 首旧缓存`); }
   }, [library.tracks, notify, updateDownload]);
 
-  const playTrack = useCallback((track: Track, list = library.tracks) => {
-    if (!online && !downloadedIds.has(track.id)) { notify("这首歌尚未离线保存"); return; }
-    setQueue(list.map((item) => item.id));
-    setCurrentId(track.id);
+  const playTrack = useCallback((track: PlayableTrack, list: PlayableTrack[] = library.tracks) => {
+    if (!isRemoteTrack(track) && !online && !downloadedIds.has(track.id)) { notify("这首歌尚未离线保存"); return; }
+    if (isRemoteTrack(track) && !online) { notify("搜索点播需要网络连接"); return; }
+    setQueue(list);
+    setCurrent(track);
     setPosition(0);
     window.setTimeout(() => audioRef.current?.play().catch(() => notify("点击播放键开始播放")), 0);
   }, [downloadedIds, library.tracks, notify, online]);
 
   const move = useCallback((direction: 1 | -1) => {
-    if (!currentId || !queue.length) return;
-    const index = queue.indexOf(currentId);
+    if (!current || !queue.length) return;
+    const index = queue.findIndex((item) => trackKey(item) === trackKey(current));
     let nextIndex = index + direction;
     if (shuffle) nextIndex = Math.floor(Math.random() * queue.length);
     if (nextIndex < 0 || nextIndex >= queue.length) {
       if (repeat === "all") nextIndex = (nextIndex + queue.length) % queue.length;
       else { audioRef.current?.pause(); return; }
     }
-    const next = library.tracks.find((track) => track.id === queue[nextIndex]);
-    if (next) playTrack(next, queue.map((id) => library.tracks.find((track) => track.id === id)).filter(Boolean) as Track[]);
-  }, [currentId, library.tracks, playTrack, queue, repeat, shuffle]);
+    const next = queue[nextIndex];
+    if (next) playTrack(next, queue);
+  }, [current, playTrack, queue, repeat, shuffle]);
 
   const prebufferNext = useCallback(() => {
-    if (!currentId || !queue.length || shuffle || repeat === "one") return;
-    const index = queue.indexOf(currentId);
+    if (!current || !queue.length || shuffle || repeat === "one") return;
+    const index = queue.findIndex((item) => trackKey(item) === trackKey(current));
     if (index < 0) return;
     let nextIndex = index + 1;
     if (nextIndex >= queue.length) {
       if (repeat !== "all") return;
       nextIndex = 0;
     }
-    const nextId = queue[nextIndex];
-    if (!nextId || nextId === currentId || prebufferedTrackRef.current === nextId) return;
-    prebufferedTrackRef.current = nextId;
-    void prebufferTrack(nextId).catch(() => { prebufferedTrackRef.current = null; });
-  }, [currentId, queue, repeat, shuffle]);
+    const next = queue[nextIndex];
+    if (!next || isRemoteTrack(next) || trackKey(next) === trackKey(current) || prebufferedTrackRef.current === next.id) return;
+    prebufferedTrackRef.current = next.id;
+    void prebufferTrack(next.id).catch(() => { prebufferedTrackRef.current = null; });
+  }, [current, queue, repeat, shuffle]);
 
   useEffect(() => {
     if (!current || !("mediaSession" in navigator)) return;
@@ -229,8 +231,20 @@ function App() {
     } catch (error) { notify((error as Error).message); }
   };
 
+  const toggleFavorite = async (track: PlayableTrack) => {
+    if (!isRemoteTrack(track)) return favorite(track);
+    try {
+      const value = await api.saveSearchTrack(track.token);
+      setLibrary((old) => ({ ...old, tracks: [value.track, ...old.tracks.filter((item) => item.id !== value.track.id)] }));
+      setQueue((old) => old.map((item) => trackKey(item) === trackKey(track) ? value.track : item));
+      setCurrent((old) => old && trackKey(old) === trackKey(track) ? value.track : old);
+      notify("已收藏到音乐库");
+    } catch (error) { notify((error as Error).message); }
+  };
+
   const nav = [
     { id: "home" as const, label: "首页", icon: Home },
+    { id: "search" as const, label: "搜索", icon: Search },
     { id: "library" as const, label: "音乐库", icon: Library },
     { id: "downloads" as const, label: "下载", icon: ArrowDownToLine },
     { id: "settings" as const, label: "设置", icon: Settings },
@@ -240,7 +254,7 @@ function App() {
     <div className="app-shell">
       <audio
         ref={audioRef}
-        src={current ? `/api/tracks/${current.id}/audio` : undefined}
+        src={current ? isRemoteTrack(current) ? `/api/search/results/${current.token}/audio` : `/api/tracks/${current.id}/audio` : undefined}
         preload="metadata"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
@@ -249,7 +263,7 @@ function App() {
           const time = event.currentTarget.currentTime;
           setPosition(time);
           if (Number.isFinite(event.currentTarget.duration) && event.currentTarget.duration - time <= 30) prebufferNext();
-          if (current && Math.floor(time) % 15 === 0) void api.history(current.id, time).catch(() => undefined);
+          if (current && !isRemoteTrack(current) && Math.floor(time) % 15 === 0) void api.history(current.id, time).catch(() => undefined);
           if ("mediaSession" in navigator && Number.isFinite(event.currentTarget.duration)) {
             try { navigator.mediaSession.setPositionState({ duration: event.currentTarget.duration, position: time, playbackRate: event.currentTarget.playbackRate }); } catch { /* transient metadata */ }
           }
@@ -265,19 +279,20 @@ function App() {
 
       <main className="content">
         {tab === "home" && <HomePage library={library} loading={loading} downloadedIds={downloadedIds} playTrack={playTrack} setTab={setTab} openImport={() => setImportOpen(true)} />}
+        {tab === "search" && <SearchPage providers={providers} playTrack={playTrack} favorite={toggleFavorite} />}
         {tab === "library" && <LibraryPage library={library} query={query} setQuery={setQuery} downloadedIds={downloadedIds} playTrack={playTrack} favorite={favorite} download={startDownload} sync={async (id) => { try { await api.sync(id); await refresh(); notify("歌单已同步"); } catch (error) { notify((error as Error).message); } }} openImport={() => setImportOpen(true)} />}
         {tab === "downloads" && <DownloadsPage records={downloads} tracks={library.tracks} storage={storage} pause={pauseDownload} retry={startDownload} remove={async (id) => { await removeDownload(id); setDownloads(await getDownloads()); await refreshStorage(); }} togglePin={async (record) => { const next = { ...record, pinned: !record.pinned }; await saveDownload(next); setDownloads(await getDownloads()); }} playTrack={playTrack} />}
         {tab === "settings" && <SettingsPage profile={profile} providers={providers} storage={storage} setProfile={setProfile} setProviders={setProviders} refreshStorage={refreshStorage} notify={notify} />}
       </main>
 
-      {current && <MiniPlayer track={current} playing={playing} progress={duration ? position / duration : 0} downloaded={downloadedIds.has(current.id)} onOpen={() => setPlayerOpen(true)} onPlay={togglePlay} onFavorite={() => void favorite(current)} onNext={() => move(1)} />}
+      {current && <MiniPlayer track={current} playing={playing} progress={duration ? position / duration : 0} downloaded={!isRemoteTrack(current) && downloadedIds.has(current.id)} onOpen={() => setPlayerOpen(true)} onPlay={togglePlay} onFavorite={() => void toggleFavorite(current)} onNext={() => move(1)} />}
 
       <nav className="bottom-nav">
         {nav.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}><item.icon size={21} strokeWidth={tab === item.id ? 2.5 : 1.8} /><span>{item.label}</span></button>)}
       </nav>
 
       {importOpen && <ImportSheet providers={providers} onClose={() => setImportOpen(false)} onDone={async (message) => { setImportOpen(false); await refresh(); notify(message); }} notify={notify} />}
-      {playerOpen && current && <FullPlayer track={current} playing={playing} position={position} duration={duration || current.duration} repeat={repeat} shuffle={shuffle} speed={speed} lyrics={lyrics} queue={queue.map((id) => library.tracks.find((track) => track.id === id)).filter(Boolean) as Track[]} downloaded={downloadedIds.has(current.id)} sleepUntil={sleepUntil} sleepAfterTrack={sleepAfterTrack} close={() => setPlayerOpen(false)} togglePlay={togglePlay} move={move} seek={(value) => { if (audioRef.current) audioRef.current.currentTime = value; }} toggleFavorite={() => favorite(current)} setRepeat={setRepeat} setShuffle={setShuffle} setSpeed={setSpeed} download={() => void startDownload(current.id)} setSleep={(minutes) => { setSleepAfterTrack(false); setSleepUntil(minutes ? Date.now() + minutes * 60_000 : null); }} setSleepAfterTrack={setSleepAfterTrack} removeFromQueue={(id) => setQueue((old) => old.filter((value) => value !== id))} />}
+      {playerOpen && current && <FullPlayer track={current} playing={playing} position={position} duration={duration || current.duration} repeat={repeat} shuffle={shuffle} speed={speed} lyrics={lyrics} queue={queue} downloaded={!isRemoteTrack(current) && downloadedIds.has(current.id)} sleepUntil={sleepUntil} sleepAfterTrack={sleepAfterTrack} close={() => setPlayerOpen(false)} togglePlay={togglePlay} move={move} seek={(value) => { if (audioRef.current) audioRef.current.currentTime = value; }} toggleFavorite={() => void toggleFavorite(current)} setRepeat={setRepeat} setShuffle={setShuffle} setSpeed={setSpeed} download={() => { if (!isRemoteTrack(current)) void startDownload(current.id); else notify("收藏后即可下载"); }} setSleep={(minutes) => { setSleepAfterTrack(false); setSleepUntil(minutes ? Date.now() + minutes * 60_000 : null); }} setSleepAfterTrack={setSleepAfterTrack} removeFromQueue={(item) => setQueue((old) => old.filter((value) => trackKey(value) !== trackKey(item)))} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
@@ -315,6 +330,48 @@ function SectionHeader({ title, action, onClick }: { title: string; action?: str
 
 function TrackList({ tracks, downloadedIds, onPlay, extra }: { tracks: Track[]; downloadedIds: Set<number>; onPlay: (track: Track) => void; extra?: (track: Track) => React.ReactNode }) {
   return <div className="track-list">{tracks.map((track, index) => <div className="track-row" key={track.id}><button className="track-cover" style={coverStyle(track, index)} onClick={() => onPlay(track)} aria-label={`播放 ${track.title}`}><Play className="cover-play" size={18} fill="currentColor" /></button><button className="track-copy" onClick={() => onPlay(track)}><strong>{track.title}</strong><span>{track.artist}{downloadedIds.has(track.id) && <><i>·</i><CloudOff size={12} /> 已下载</>}</span></button><span className="track-time">{fmt(track.duration)}</span>{extra?.(track)}</div>)}</div>;
+}
+
+function SearchPage({ providers, playTrack, favorite }: { providers: ProviderProfile[]; playTrack: (track: PlayableTrack, list?: PlayableTrack[]) => void; favorite: (track: PlayableTrack) => void }) {
+  const [query, setQuery] = useState("");
+  const [submittedQuery, setSubmittedQuery] = useState("");
+  const [provider, setProvider] = useState("all");
+  const [tracks, setTracks] = useState<RemoteTrack[]>([]);
+  const [errors, setErrors] = useState<Array<{ provider: string; error: string }>>([]);
+  const [loading, setLoading] = useState(false);
+  const searchable = providers.filter((item) => item.capabilities.includes("search"));
+  useEffect(() => {
+    const value = submittedQuery;
+    if (value.length < 2) { setTracks([]); setErrors([]); return; }
+    let active = true;
+    setLoading(true);
+    void api.search(value, provider === "all" ? undefined : [provider]).then((result) => {
+      if (!active) return;
+      setTracks(result.tracks); setErrors(result.errors);
+    }).catch((error) => active && setErrors([{ provider: "search", error: (error as Error).message }])).finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, [submittedQuery, provider]);
+  const submitSearch = (event: React.FormEvent) => {
+    event.preventDefault();
+    const value = query.trim();
+    if (value.length < 2) {
+      setSubmittedQuery("");
+      setTracks([]);
+      setErrors([]);
+      return;
+    }
+    setSubmittedQuery(value);
+  };
+  return <>
+    <div className="page-title"><div><p className="eyebrow">跨来源点播</p><h1>搜索</h1></div><Search size={30} /></div>
+    <form className="search-box" onSubmit={submitSearch}><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索歌曲、视频或创作者" autoFocus />{query && <button type="button" onClick={() => setQuery("")} aria-label="清除搜索"><X size={16} /></button>}<button type="submit" aria-label="搜索"><Search size={16} /></button></form>
+    <div className="filter-pills"><button className={provider === "all" ? "active" : ""} onClick={() => setProvider("all")}>全部来源</button>{searchable.map((item) => <button key={item.id} className={provider === item.id ? "active" : ""} onClick={() => setProvider(item.id)}>{item.name}</button>)}</div>
+    {submittedQuery.length < 2 ? <div className="soft-empty"><Search size={30} /><p>搜索想听的声音</p><span>输入至少两个字符，按回车搜索；结果可直接点播。</span></div> : loading ? <div className="soft-empty"><RefreshCw className="rotating" size={28} /><p>正在搜索…</p></div> : <>
+      {errors.map((item) => <div className="search-error" key={item.provider}>{item.provider}：{item.error}</div>)}
+      <SectionHeader title="搜索结果" action={`${tracks.length} 首`} />
+      {tracks.length ? <div className="track-list">{tracks.map((track, index) => <div className="track-row" key={track.token}><button className="track-cover" style={coverStyle(track, index)} onClick={() => playTrack(track, tracks)}><Play className="cover-play" size={18} fill="currentColor" /></button><button className="track-copy" onClick={() => playTrack(track, tracks)}><strong>{track.title}</strong><span>{track.artist}<i>·</i>{track.source.provider === "bilibili" ? "Bilibili" : track.source.provider}<i>·</i>临时点播</span></button><span className="track-time">{fmt(track.duration)}</span><div className="track-actions"><button onClick={() => void favorite(track)} aria-label="收藏到音乐库"><Heart size={17} /></button></div></div>)}</div> : <div className="soft-empty"><Search size={30} /><p>没有找到结果</p><span>换个关键词或来源试试。</span></div>}
+    </>}
+  </>;
 }
 
 function LibraryPage({ library, query, setQuery, downloadedIds, playTrack, favorite, download, sync, openImport }: { library: LibrarySnapshot; query: string; setQuery: (value: string) => void; downloadedIds: Set<number>; playTrack: (track: Track, list?: Track[]) => void; favorite: (track: Track) => void; download: (id: number) => void; sync: (id: number) => void; openImport: () => void }) {
@@ -390,11 +447,11 @@ function SettingsPage({ profile, providers, storage, setProfile, setProviders, r
   </>;
 }
 
-function MiniPlayer({ track, playing, progress, downloaded, onOpen, onPlay, onFavorite, onNext }: { track: Track; playing: boolean; progress: number; downloaded: boolean; onOpen: () => void; onPlay: () => void; onFavorite: () => void; onNext: () => void }) {
+function MiniPlayer({ track, playing, progress, downloaded, onOpen, onPlay, onFavorite, onNext }: { track: PlayableTrack; playing: boolean; progress: number; downloaded: boolean; onOpen: () => void; onPlay: () => void; onFavorite: () => void; onNext: () => void }) {
   return <div className="mini-player"><div className="mini-progress" style={{ width: `${progress * 100}%` }} /><button className="mini-main" onClick={onOpen}><span className={`mini-cover ${playing ? "spinning" : ""}`} style={coverStyle(track)} /><span><strong>{track.title}</strong><small>{track.artist} {downloaded ? "· 本地" : "· 在线"}</small></span></button><button className={`mini-favorite ${track.favorite ? "liked" : ""}`} onClick={onFavorite} aria-label={track.favorite ? "取消收藏" : "收藏"}><Heart size={20} fill={track.favorite ? "currentColor" : "none"} /></button><button onClick={onPlay}>{playing ? <Pause size={21} fill="currentColor" /> : <Play size={21} fill="currentColor" />}</button><button onClick={onNext}><SkipForward size={21} fill="currentColor" /></button></div>;
 }
 
-function FullPlayer({ track, playing, position, duration, repeat, shuffle, speed, lyrics, queue, downloaded, sleepUntil, sleepAfterTrack, close, togglePlay, move, seek, toggleFavorite, setRepeat, setShuffle, setSpeed, download, setSleep, setSleepAfterTrack, removeFromQueue }: { track: Track; playing: boolean; position: number; duration: number; repeat: RepeatMode; shuffle: boolean; speed: number; lyrics: Array<{ from: number; to: number; content: string }>; queue: Track[]; downloaded: boolean; sleepUntil: number | null; sleepAfterTrack: boolean; close: () => void; togglePlay: () => void; move: (value: 1 | -1) => void; seek: (value: number) => void; toggleFavorite: () => void; setRepeat: (value: RepeatMode) => void; setShuffle: (value: boolean) => void; setSpeed: (value: number) => void; download: () => void; setSleep: (minutes: number) => void; setSleepAfterTrack: (value: boolean) => void; removeFromQueue: (id: number) => void }) {
+function FullPlayer({ track, playing, position, duration, repeat, shuffle, speed, lyrics, queue, downloaded, sleepUntil, sleepAfterTrack, close, togglePlay, move, seek, toggleFavorite, setRepeat, setShuffle, setSpeed, download, setSleep, setSleepAfterTrack, removeFromQueue }: { track: PlayableTrack; playing: boolean; position: number; duration: number; repeat: RepeatMode; shuffle: boolean; speed: number; lyrics: Array<{ from: number; to: number; content: string }>; queue: PlayableTrack[]; downloaded: boolean; sleepUntil: number | null; sleepAfterTrack: boolean; close: () => void; togglePlay: () => void; move: (value: 1 | -1) => void; seek: (value: number) => void; toggleFavorite: () => void; setRepeat: (value: RepeatMode) => void; setShuffle: (value: boolean) => void; setSpeed: (value: number) => void; download: () => void; setSleep: (minutes: number) => void; setSleepAfterTrack: (value: boolean) => void; removeFromQueue: (item: PlayableTrack) => void }) {
   const [panel, setPanel] = useState<"lyrics" | "queue" | "sleep" | null>(null);
   const activeLine = lyrics.findIndex((line) => position >= line.from && position < line.to);
   const cycleRepeat = () => setRepeat(repeat === "off" ? "all" : repeat === "all" ? "one" : "off");
@@ -405,8 +462,8 @@ function FullPlayer({ track, playing, position, duration, repeat, shuffle, speed
     <div className="player-meta"><div><h2>{track.title}</h2><p>{track.artist}</p></div><button className={track.favorite ? "liked" : ""} onClick={toggleFavorite}><Heart size={24} fill={track.favorite ? "currentColor" : "none"} /></button></div>
     <div className="seek"><input type="range" min="0" max={duration || 1} value={position} onChange={(event) => seek(Number(event.target.value))} style={{ "--value": `${duration ? position / duration * 100 : 0}%` } as React.CSSProperties} /><div><span>{fmt(position)}</span><span>{downloaded ? "本地缓存" : track.source.provider === "bilibili" ? "Bilibili 音频" : `${track.source.provider} 音频`}</span><span>-{fmt(Math.max(0, duration - position))}</span></div></div>
     <div className="main-controls"><button className={shuffle ? "active" : ""} onClick={() => setShuffle(!shuffle)}><Shuffle size={21} /></button><button onClick={() => move(-1)}><SkipBack size={29} fill="currentColor" /></button><button className="play-button" onClick={togglePlay}>{playing ? <Pause size={31} fill="currentColor" /> : <Play size={31} fill="currentColor" />}</button><button onClick={() => move(1)}><SkipForward size={29} fill="currentColor" /></button><button className={repeat !== "off" ? "active" : ""} onClick={cycleRepeat}>{repeat === "one" ? <Repeat1 size={21} /> : <Repeat size={21} />}</button></div>
-    <div className="player-tools"><button onClick={() => setPanel(panel === "lyrics" ? null : "lyrics")}><Music2 size={19} /><span>歌词</span></button><button onClick={download} disabled={downloaded}>{downloaded ? <CheckCircle2 size={19} /> : <Download size={19} />}<span>{downloaded ? "已下载" : "下载"}</span></button><button onClick={() => setSpeed(speed >= 2 ? .75 : speed + .25)}><strong>{speed}×</strong><span>倍速</span></button><button onClick={() => setPanel(panel === "sleep" ? null : "sleep")} className={sleepUntil || sleepAfterTrack ? "active" : ""}><Timer size={19} /><span>定时</span></button></div>
-    {panel && <div className="player-panel"><div className="panel-handle" />{panel === "lyrics" && <><h3>歌词</h3>{lyrics.length ? <div className="lyrics">{lyrics.map((line, index) => <p className={index === activeLine ? "active" : ""} key={`${line.from}-${index}`} onClick={() => seek(line.from)}>{line.content}</p>)}</div> : <div className="soft-empty"><Music2 size={28} /><p>这首歌暂时没有歌词</p></div>}</>}{panel === "queue" && <><h3>播放队列 <small>{queue.length} 首</small></h3><div className="queue-list">{queue.map((item) => <div className={item.id === track.id ? "active" : ""} key={item.id}><Menu size={16} /><span><strong>{item.title}</strong><small>{item.artist}</small></span>{item.id !== track.id && <button onClick={() => removeFromQueue(item.id)}><X size={17} /></button>}</div>)}</div></>}{panel === "sleep" && <><h3>睡眠定时</h3><div className="sleep-grid">{[15,30,60,90].map((minutes) => <button key={minutes} onClick={() => setSleep(minutes)}>{minutes}<small>分钟</small></button>)}<button className={sleepAfterTrack ? "selected" : ""} onClick={() => { setSleep(0); setSleepAfterTrack(!sleepAfterTrack); }}>本曲<small>结束后</small></button><button onClick={() => { setSleep(0); setSleepAfterTrack(false); }}>关闭<small>定时</small></button></div></>}</div>}
+    <div className="player-tools"><button onClick={() => setPanel(panel === "lyrics" ? null : "lyrics")}><Music2 size={19} /><span>歌词</span></button><button onClick={download} disabled={downloaded}>{downloaded ? <CheckCircle2 size={19} /> : <Download size={19} />}<span>{downloaded ? "已下载" : isRemoteTrack(track) ? "收藏后下载" : "下载"}</span></button><button onClick={() => setSpeed(speed >= 2 ? .75 : speed + .25)}><strong>{speed}×</strong><span>倍速</span></button><button onClick={() => setPanel(panel === "sleep" ? null : "sleep")} className={sleepUntil || sleepAfterTrack ? "active" : ""}><Timer size={19} /><span>定时</span></button></div>
+    {panel && <div className="player-panel"><div className="panel-handle" />{panel === "lyrics" && <><h3>歌词</h3>{lyrics.length ? <div className="lyrics">{lyrics.map((line, index) => <p className={index === activeLine ? "active" : ""} key={`${line.from}-${index}`} onClick={() => seek(line.from)}>{line.content}</p>)}</div> : <div className="soft-empty"><Music2 size={28} /><p>这首歌暂时没有歌词</p></div>}</>}{panel === "queue" && <><h3>播放队列 <small>{queue.length} 首</small></h3><div className="queue-list">{queue.map((item) => <div className={trackKey(item) === trackKey(track) ? "active" : ""} key={trackKey(item)}><Menu size={16} /><span><strong>{item.title}</strong><small>{item.artist}</small></span>{trackKey(item) !== trackKey(track) && <button onClick={() => removeFromQueue(item)}><X size={17} /></button>}</div>)}</div></>}{panel === "sleep" && <><h3>睡眠定时</h3><div className="sleep-grid">{[15,30,60,90].map((minutes) => <button key={minutes} onClick={() => setSleep(minutes)}>{minutes}<small>分钟</small></button>)}<button className={sleepAfterTrack ? "selected" : ""} onClick={() => { setSleep(0); setSleepAfterTrack(!sleepAfterTrack); }}>本曲<small>结束后</small></button><button onClick={() => { setSleep(0); setSleepAfterTrack(false); }}>关闭<small>定时</small></button></div></>}</div>}
   </div>;
 }
 

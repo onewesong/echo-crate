@@ -9,10 +9,12 @@ import {
   pollQrLogin,
   resolveAudio,
   resolveLyrics,
+  saveBilibiliSearchTrack,
+  searchBilibili,
   syncPlaylist as syncBilibiliPlaylist,
   upstreamHeaders,
 } from "./bilibili.js";
-import type { ProviderProfile, SourceRef } from "./types.js";
+import type { ProviderProfile, SearchTrack, SourceRef, Track } from "./types.js";
 
 export type MusicProvider = {
   id: string;
@@ -23,6 +25,8 @@ export type MusicProvider = {
   profile(): Promise<ProviderProfile["profile"]>;
   importSource(input: string): ReturnType<typeof importBilibiliSource>;
   previewSource(input: string): ReturnType<typeof previewBilibiliSource>;
+  search?(query: string): Promise<SearchTrack[]>;
+  saveSearchTrack?(track: SearchTrack): Track;
   syncPlaylist(id: number): ReturnType<typeof syncBilibiliPlaylist>;
   resolveAudio(source: SourceRef): ReturnType<typeof resolveAudio>;
   resolveLyrics(source: SourceRef): ReturnType<typeof resolveLyrics>;
@@ -34,7 +38,7 @@ const bilibili: MusicProvider = {
   id: BILIBILI_PROVIDER_ID,
   name: BILIBILI_PROVIDER_NAME,
   description: "导入收藏夹、合集和视频分 P，并按需代理音频播放。",
-  capabilities: ["import", "stream", "lyrics", "login"],
+  capabilities: ["import", "stream", "lyrics", "login", "search"],
   accepts: (input) => /(?:bilibili\.com|b23\.tv|BV[0-9A-Za-z]{10})/i.test(input),
   profile: async () => {
     const profile = await getProfile();
@@ -42,6 +46,8 @@ const bilibili: MusicProvider = {
   },
   importSource: importBilibiliSource,
   previewSource: previewBilibiliSource,
+  search: searchBilibili,
+  saveSearchTrack: saveBilibiliSearchTrack,
   syncPlaylist: syncBilibiliPlaylist,
   resolveAudio: (source) => resolveAudio(source.resourceId, Number(source.itemId)),
   resolveLyrics: (source) => resolveLyrics(source.resourceId, Number(source.itemId)),

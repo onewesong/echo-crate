@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { db, getTrack, listPlaylists, listTracks, playlistTracks } from "./db.js";
 import { getProvider, listProviders, providerForInput } from "./providers.js";
+import { getSearchTrack, storeSearchTrack } from "./search-results.js";
 
 const app = Fastify({ logger: true, trustProxy: true });
 
@@ -36,6 +37,27 @@ app.post<{ Params: { provider: string } }>("/api/providers/:provider/logout", as
 });
 
 app.get("/api/library", async () => ({ tracks: listTracks(), playlists: listPlaylists() }));
+app.get<{ Querystring: { q?: string; providers?: string } }>("/api/search", async (request, reply) => {
+  const query = request.query.q?.trim() || "";
+  if (query.length < 2) return reply.code(400).send({ error: "搜索关键词至少需要 2 个字符" });
+  const profiles = await listProviders();
+  const requested = request.query.providers?.split(",").map((item) => item.trim()).filter(Boolean)
+    || profiles.filter((item) => item.capabilities.includes("search")).map((item) => item.id);
+  const searches = await Promise.allSettled(requested.map(async (id) => {
+    const provider = getProvider(id);
+    if (!provider.search) throw Object.assign(new Error("该来源暂不支持搜索"), { statusCode: 422 });
+    return { id, tracks: await provider.search(query) };
+  }));
+  const tracks = [] as ReturnType<typeof storeSearchTrack>[];
+  const errors: Array<{ provider: string; error: string }> = [];
+  for (let index = 0; index < searches.length; index += 1) {
+    const result = searches[index];
+    const provider = requested[index];
+    if (result.status === "fulfilled") tracks.push(...result.value.tracks.map(storeSearchTrack));
+    else errors.push({ provider, error: result.reason instanceof Error ? result.reason.message : "搜索失败" });
+  }
+  return { query, tracks, errors };
+});
 app.get<{ Params: { id: string } }>("/api/playlists/:id/tracks", async (request) => ({ tracks: playlistTracks(Number(request.params.id)) }));
 app.post<{ Body: { url?: string; provider?: string } }>("/api/imports", async (request, reply) => {
   if (!request.body?.url) return reply.code(400).send({ error: "请提供音乐来源链接" });
@@ -82,6 +104,23 @@ app.get<{ Params: { id: string } }>("/api/tracks/:id/audio", async (request, rep
   return reply.send(Readable.fromWeb(upstream.body as never));
 });
 
+app.get<{ Params: { token: string } }>("/api/search/results/:token/audio", async (request, reply) => {
+  const track = getSearchTrack(request.params.token);
+  const provider = getProvider(track.provider);
+  const source = await provider.resolveAudio(track.source);
+  if (!source.url) return reply.code(502).send({ error: "音频地址不可用" });
+  const upstream = await fetch(source.url, { headers: provider.upstreamHeaders?.(request.headers.range) });
+  if (!upstream.ok || !upstream.body) return reply.code(upstream.status || 502).send({ error: "音频来源暂时不可用" });
+  reply.code(upstream.status);
+  for (const name of ["content-length", "content-range", "accept-ranges", "etag", "last-modified"]) {
+    const value = upstream.headers.get(name);
+    if (value) reply.header(name, value);
+  }
+  reply.header("content-type", upstream.headers.get("content-type") || source.mime);
+  reply.header("cache-control", "private, no-store");
+  return reply.send(Readable.fromWeb(upstream.body as never));
+});
+
 app.get<{ Params: { id: string } }>("/api/tracks/:id/lyrics", async (request, reply) => {
   const id = Number(request.params.id);
   const saved = db.prepare("SELECT format, content FROM lyrics WHERE track_id = ?").get(id) as { format: string; content: string } | undefined;
@@ -89,6 +128,18 @@ app.get<{ Params: { id: string } }>("/api/tracks/:id/lyrics", async (request, re
   const track = getTrack(id);
   if (!track) return reply.code(404).send({ error: "曲目不存在" });
   return getProvider(track.source.provider).resolveLyrics(track.source);
+});
+
+app.get<{ Params: { token: string } }>("/api/search/results/:token/lyrics", async (request) => {
+  const track = getSearchTrack(request.params.token);
+  return getProvider(track.provider).resolveLyrics(track.source);
+});
+
+app.post<{ Params: { token: string } }>("/api/search/results/:token/save", async (request, reply) => {
+  const track = getSearchTrack(request.params.token);
+  const provider = getProvider(track.provider);
+  if (!provider.saveSearchTrack) return reply.code(422).send({ error: "该来源暂不支持保存搜索结果" });
+  return { track: provider.saveSearchTrack(track) };
 });
 
 app.post<{ Params: { id: string }; Body: { content?: string } }>("/api/tracks/:id/lyrics", async (request, reply) => {

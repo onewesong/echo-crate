@@ -28,9 +28,24 @@ export type ProviderProfile = {
   name: string;
   description: string;
   connected: boolean;
-  capabilities: Array<"import" | "stream" | "lyrics" | "login">;
+  capabilities: Array<"import" | "stream" | "lyrics" | "login" | "search">;
   profile?: { name: string; avatar?: string; id?: string | number } | null;
 };
+
+export type RemoteTrack = {
+  id: string;
+  kind: "remote";
+  token: string;
+  title: string;
+  artist: string;
+  cover: string;
+  duration: number;
+  source: { provider: string; resourceId: string; itemId?: string; metadata?: Record<string, unknown> };
+  favorite: false;
+  status: "available";
+};
+
+export type PlayableTrack = Track | RemoteTrack;
 
 export type DownloadRecord = {
   trackId: number;
@@ -44,4 +59,4 @@ export type DownloadRecord = {
 };
 
 export type RepeatMode = "off" | "all" | "one";
-export type Tab = "home" | "library" | "downloads" | "settings";
+export type Tab = "home" | "search" | "library" | "downloads" | "settings";

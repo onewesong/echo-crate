@@ -1,7 +1,7 @@
 import QRCode from "qrcode";
 import { decrypt, encrypt } from "./crypto.js";
-import { db, deleteSetting, getSetting, setSetting } from "./db.js";
-import type { BiliVideo, Playlist } from "./types.js";
+import { db, deleteSetting, getSetting, getTrack, setSetting } from "./db.js";
+import type { BiliVideo, Playlist, SearchTrack, Track } from "./types.js";
 
 export const BILIBILI_PROVIDER_ID = "bilibili";
 export const BILIBILI_PROVIDER_NAME = "Bilibili";
@@ -22,6 +22,9 @@ async function biliJson<T>(url: string, includeCookies = true): Promise<T> {
     headers: {
       "user-agent": USER_AGENT,
       referer: "https://www.bilibili.com/",
+      origin: "https://www.bilibili.com",
+      accept: "application/json, text/plain, */*",
+      "accept-language": "zh-CN,zh;q=0.9",
       ...(includeCookies && cookies() ? { cookie: cookies() } : {}),
     },
   });
@@ -200,12 +203,57 @@ async function loadSource(input: string): Promise<LoadedSource> {
 
 function previewTracks(videos: BiliVideo[]) {
   return videos.flatMap((video) => video.pages.map((page) => ({
+    provider: BILIBILI_PROVIDER_ID,
     title: video.pages.length > 1 ? `${page.part} · ${video.title}` : video.title,
     artist: video.owner.name,
     cover: video.pic,
     duration: page.duration || video.duration,
     source: { provider: BILIBILI_PROVIDER_ID, resourceId: video.bvid, itemId: String(page.cid), metadata: { page: page.page } },
   })));
+}
+
+export async function searchBilibili(query: string): Promise<SearchTrack[]> {
+  const keyword = query.trim();
+  if (keyword.length < 2) return [];
+  const response = await fetch(`${API}/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(keyword)}&page=1&page_size=20`, {
+    headers: {
+      "user-agent": USER_AGENT,
+      referer: "https://search.bilibili.com/",
+      origin: "https://search.bilibili.com",
+      accept: "application/json, text/plain, */*",
+      "accept-language": "zh-CN,zh;q=0.9",
+      ...(cookies() ? { cookie: cookies() } : {}),
+    },
+  });
+  if (!response.ok) throw new Error(`Bilibili 搜索请求失败 (${response.status})`);
+  const payload = await response.json() as BiliResponse<{ result?: Array<{ bvid?: string }> }>;
+  if (payload.code !== 0) throw new Error(payload.message || `Bilibili 搜索错误 ${payload.code}`);
+  const data = payload.data;
+  const videos = await Promise.all((data.result || []).slice(0, 20).map(async (item) => {
+    if (!item.bvid) return null;
+    try { return await fetchVideo(item.bvid); } catch { return null; }
+  }));
+  return previewTracks(videos.filter((video): video is BiliVideo => Boolean(video)));
+}
+
+/** Persist an explicitly saved remote Bilibili result and mark it as favorite. */
+export function saveBilibiliSearchTrack(track: SearchTrack): Track {
+  const bvid = track.source.resourceId;
+  const cid = Number(track.source.itemId);
+  const page = Number(track.source.metadata?.page || 1);
+  if (!bvid || !Number.isInteger(cid)) throw new Error("搜索曲目的来源信息无效");
+  const sourceKey = `${bvid}:${cid}`;
+  db.prepare(`INSERT INTO tracks(source_key, provider, source_ref, bvid, cid, page, title, artist, cover, duration, favorite)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+    ON CONFLICT(source_key) DO UPDATE SET
+      provider=excluded.provider, source_ref=excluded.source_ref, title=excluded.title,
+      artist=excluded.artist, cover=excluded.cover, duration=excluded.duration, favorite=1,
+      status='available', updated_at=CURRENT_TIMESTAMP`).run(
+        sourceKey, BILIBILI_PROVIDER_ID, JSON.stringify(track.source), bvid, cid, page,
+        track.title, track.artist, track.cover, track.duration,
+      );
+  const row = db.prepare("SELECT id FROM tracks WHERE source_key = ?").get(sourceKey) as { id: number };
+  return getTrack(row.id)!;
 }
 
 /** Read metadata and split video parts without changing the local library. */

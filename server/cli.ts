@@ -15,7 +15,7 @@ function parseArgs(argv: string[]): Args {
 }
 
 function usage() {
-  return `EchoCrate CLI\n\nUsage:\n  echo-crate providers\n  echo-crate profile [provider]\n  echo-crate login [provider]\n  echo-crate login-status <qr-key> [--provider <id>]\n  echo-crate logout [provider]\n  echo-crate preview <url> [--provider <id>]\n  echo-crate import <url> [--provider <id>]\n  echo-crate sync <playlist-id>\n  echo-crate library\n  echo-crate playlist <playlist-id>\n  echo-crate track <track-id>\n  echo-crate audio <track-id>\n  echo-crate lyrics <track-id>\n\nRead-only commands: providers, profile, preview, library, playlist, track, audio, lyrics.\nMutating commands: login, logout, import, sync.`;
+  return `EchoCrate CLI\n\nUsage:\n  echo-crate providers\n  echo-crate profile [provider]\n  echo-crate login [provider]\n  echo-crate login-status <qr-key> [--provider <id>]\n  echo-crate logout [provider]\n  echo-crate search <query> [--provider <id>]\n  echo-crate preview <url> [--provider <id>]\n  echo-crate import <url> [--provider <id>]\n  echo-crate sync <playlist-id>\n  echo-crate library\n  echo-crate playlist <playlist-id>\n  echo-crate track <track-id>\n  echo-crate audio <track-id>\n  echo-crate lyrics <track-id>\n\nRead-only commands: providers, profile, search, preview, library, playlist, track, audio, lyrics.\nMutating commands: login, logout, import, sync.`;
 }
 
 function numberArg(value: string | undefined, label: string) {
@@ -46,6 +46,13 @@ async function run(args: Args) {
       if (!login) throw new Error(`${providerId} 不支持登录`);
       login.logout();
       return { ok: true, provider: providerId };
+    }
+    case "search": {
+      const query = args.values.join(" ").trim();
+      if (query.length < 2) throw new Error("搜索关键词至少需要 2 个字符");
+      const provider = getProvider(args.provider || "bilibili");
+      if (!provider.search) throw new Error(`${provider.id} 暂不支持搜索`);
+      return { provider: provider.id, query, tracks: await provider.search(query) };
     }
     case "preview": {
       const input = args.values[0];

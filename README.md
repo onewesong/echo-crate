@@ -52,6 +52,9 @@ CLI 直接复用服务端 Provider，不需要启动 Web 服务；输出均为 J
 ./bin/echo-crate providers
 ./bin/echo-crate profile bilibili
 
+# 搜索 Provider 内容（只读，不写入音乐库）
+./bin/echo-crate search '周杰伦' --provider bilibili
+
 # 生成登录二维码；复制返回的 key 后轮询登录状态
 ./bin/echo-crate login bilibili
 ./bin/echo-crate login-status '<qr-key>' --provider bilibili
