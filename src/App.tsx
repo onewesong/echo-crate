@@ -13,6 +13,7 @@ import type { DownloadRecord, Playlist, PlayableTrack, ProviderProfile, RemoteTr
 
 type LibrarySnapshot = { tracks: Track[]; playlists: Playlist[] };
 type Profile = { name: string; avatar?: string; id?: string | number };
+type LibraryFilter = "all" | "favorite" | "offline";
 
 const EMPTY_LIBRARY: LibrarySnapshot = { tracks: [], playlists: [] };
 const ACCENT = ["#ff7a59", "#7c5cff", "#25c6a0", "#f4bd4f", "#ee5c8a", "#4898ff"];
@@ -51,6 +52,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState("");
   const [query, setQuery] = useState("");
+  const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>("all");
   const [importOpen, setImportOpen] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -280,9 +282,9 @@ function App() {
       </header>
 
       <main className="content">
-        {tab === "home" && <HomePage library={library} loading={loading} downloadedIds={downloadedIds} playTrack={playTrack} setTab={setTab} openImport={() => setImportOpen(true)} />}
+        {tab === "home" && <HomePage library={library} loading={loading} downloadedIds={downloadedIds} playTrack={playTrack} setTab={setTab} openFavorites={() => { setLibraryFilter("favorite"); setTab("library"); }} openImport={() => setImportOpen(true)} />}
         {tab === "search" && <SearchPage providers={providers} playTrack={playTrack} favorite={toggleFavorite} />}
-        {tab === "library" && <LibraryPage library={library} query={query} setQuery={setQuery} downloadedIds={downloadedIds} playTrack={playTrack} favorite={favorite} download={startDownload} sync={async (id) => { try { await api.sync(id); await refresh(); notify("歌单已同步"); } catch (error) { notify((error as Error).message); } }} openImport={() => setImportOpen(true)} />}
+        {tab === "library" && <LibraryPage library={library} query={query} setQuery={setQuery} filter={libraryFilter} setFilter={setLibraryFilter} downloadedIds={downloadedIds} playTrack={playTrack} favorite={favorite} download={startDownload} sync={async (id) => { try { await api.sync(id); await refresh(); notify("歌单已同步"); } catch (error) { notify((error as Error).message); } }} openImport={() => setImportOpen(true)} />}
         {tab === "downloads" && <DownloadsPage records={downloads} tracks={library.tracks} storage={storage} pause={pauseDownload} retry={startDownload} remove={async (id) => { await removeDownload(id); setDownloads(await getDownloads()); await refreshStorage(); }} togglePin={async (record) => { const next = { ...record, pinned: !record.pinned }; await saveDownload(next); setDownloads(await getDownloads()); }} playTrack={playTrack} />}
         {tab === "settings" && <SettingsPage profile={profile} providers={providers} storage={storage} setProfile={setProfile} setProviders={setProviders} refreshStorage={refreshStorage} notify={notify} />}
       </main>
@@ -290,7 +292,7 @@ function App() {
       {current && <MiniPlayer track={current} playing={playing} progress={duration ? position / duration : 0} downloaded={!isRemoteTrack(current) && downloadedIds.has(current.id)} onOpen={() => setPlayerOpen(true)} onPlay={togglePlay} onFavorite={() => void toggleFavorite(current)} onNext={() => move(1)} />}
 
       <nav className="bottom-nav">
-        {nav.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}><item.icon size={21} strokeWidth={tab === item.id ? 2.5 : 1.8} /><span>{item.label}</span></button>)}
+        {nav.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { if (item.id === "library") setLibraryFilter("all"); setTab(item.id); }}><item.icon size={21} strokeWidth={tab === item.id ? 2.5 : 1.8} /><span>{item.label}</span></button>)}
       </nav>
 
       {importOpen && <ImportSheet providers={providers} onClose={() => setImportOpen(false)} onDone={async (message) => { setImportOpen(false); await refresh(); notify(message); }} notify={notify} />}
@@ -300,9 +302,10 @@ function App() {
   );
 }
 
-function HomePage({ library, loading, downloadedIds, playTrack, setTab, openImport }: { library: LibrarySnapshot; loading: boolean; downloadedIds: Set<number>; playTrack: (track: Track, list?: Track[]) => void; setTab: (tab: Tab) => void; openImport: () => void }) {
+function HomePage({ library, loading, downloadedIds, playTrack, setTab, openFavorites, openImport }: { library: LibrarySnapshot; loading: boolean; downloadedIds: Set<number>; playTrack: (track: Track, list?: Track[]) => void; setTab: (tab: Tab) => void; openFavorites: () => void; openImport: () => void }) {
   const recent = library.tracks.slice(0, 5);
   const offline = library.tracks.filter((track) => downloadedIds.has(track.id)).slice(0, 5);
+  const favorites = library.tracks.filter((track) => track.favorite);
   if (!loading && !library.tracks.length) return <EmptyLibrary openImport={openImport} />;
   return <>
     <section className="hero-section">
@@ -313,6 +316,7 @@ function HomePage({ library, loading, downloadedIds, playTrack, setTab, openImpo
     </section>
     <SectionHeader title="最近歌单" action="查看全部" onClick={() => setTab("library")} />
     <div className="playlist-scroll">
+      <button className="playlist-card favorite-playlist" onClick={openFavorites}><div className="playlist-cover"><Heart size={31} fill="currentColor" /><span>{favorites.length} 首</span></div><h3>我的收藏</h3><p>你喜欢的声音</p></button>
       {library.playlists.slice(0, 6).map((playlist, index) => <article className="playlist-card" key={playlist.id}><div className="playlist-cover" style={coverStyle(playlist, index)}><span>{playlist.itemCount} 首</span></div><h3>{playlist.title}</h3><p>{playlist.provider === "bilibili" ? `Bilibili · ${playlist.sourceType === "favorite" ? "收藏夹" : playlist.sourceType === "collection" ? "合集" : "视频"}` : playlist.provider}</p></article>)}
       {loading && [0,1,2].map((item) => <div className="playlist-card skeleton" key={item} />)}
     </div>
@@ -376,9 +380,8 @@ function SearchPage({ providers, playTrack, favorite }: { providers: ProviderPro
   </>;
 }
 
-function LibraryPage({ library, query, setQuery, downloadedIds, playTrack, favorite, download, sync, openImport }: { library: LibrarySnapshot; query: string; setQuery: (value: string) => void; downloadedIds: Set<number>; playTrack: (track: Track, list?: Track[]) => void; favorite: (track: Track) => void; download: (id: number) => void; sync: (id: number) => void; openImport: () => void }) {
+function LibraryPage({ library, query, setQuery, filter, setFilter, downloadedIds, playTrack, favorite, download, sync, openImport }: { library: LibrarySnapshot; query: string; setQuery: (value: string) => void; filter: LibraryFilter; setFilter: (value: LibraryFilter) => void; downloadedIds: Set<number>; playTrack: (track: Track, list?: Track[]) => void; favorite: (track: Track) => void; download: (id: number) => void; sync: (id: number) => void; openImport: () => void }) {
   const [selected, setSelected] = useState<number | null>(null);
-  const [filter, setFilter] = useState<"all" | "favorite" | "offline">("all");
   const [selectedTracks, setSelectedTracks] = useState<Track[]>([]);
   useEffect(() => {
     if (selected === null) { setSelectedTracks([]); return; }

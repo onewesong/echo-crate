@@ -46,6 +46,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .playlist-scroll { display: grid; grid-auto-flow: column; grid-auto-columns: 145px; gap: 13px; overflow-x: auto; scrollbar-width: none; margin-right: -20px; padding-right: 20px; }
 .playlist-scroll::-webkit-scrollbar { display: none; }
 .playlist-card { min-width: 0; }
+.favorite-playlist { padding: 0; text-align: left; background: transparent; }
+.favorite-playlist .playlist-cover { display: grid; place-items: center; color: #ff8a70; background: radial-gradient(circle at 28% 22%, rgba(255,173,141,.38), transparent 25%), linear-gradient(135deg, #3a2027, #201526 62%, #30213b); }
 .playlist-cover { height: 145px; background-size: cover !important; background-position: center !important; border-radius: 18px; position: relative; box-shadow: 0 10px 25px rgba(0,0,0,.22); }
 .playlist-cover span { position: absolute; bottom: 10px; right: 10px; font-size: 10px; font-weight: 700; background: rgba(8,7,13,.68); backdrop-filter: blur(8px); padding: 5px 7px; border-radius: 99px; }
 .playlist-card h3 { font-size: 13px; margin: 9px 2px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
