@@ -1,21 +1,26 @@
-import { getTrack, listPlaylists, listTracks, playlistTracks } from "./db.js";
-import { getProvider, listProviders, providerForInput } from "./providers.js";
+import { resolve } from "node:path";
 
-type Args = { command?: string; values: string[]; provider?: string };
+type Args = { command?: string; values: string[]; provider?: string; port?: string; host?: string; dataDir?: string };
 
 function parseArgs(argv: string[]): Args {
   const [command, ...rest] = argv;
   const values: string[] = [];
   let provider: string | undefined;
+  let port: string | undefined;
+  let host: string | undefined;
+  let dataDir: string | undefined;
   for (let index = 0; index < rest.length; index += 1) {
     if (rest[index] === "--provider") provider = rest[++index];
+    else if (rest[index] === "--port") port = rest[++index];
+    else if (rest[index] === "--host") host = rest[++index];
+    else if (rest[index] === "--data-dir") dataDir = rest[++index];
     else values.push(rest[index]);
   }
-  return { command, values, provider };
+  return { command, values, provider, port, host, dataDir };
 }
 
 function usage() {
-  return `EchoCrate CLI\n\nUsage:\n  echo-crate providers\n  echo-crate profile [provider]\n  echo-crate login [provider]\n  echo-crate login-status <qr-key> [--provider <id>]\n  echo-crate logout [provider]\n  echo-crate search <query> [--provider <id>]\n  echo-crate preview <url> [--provider <id>]\n  echo-crate import <url> [--provider <id>]\n  echo-crate sync <playlist-id>\n  echo-crate library\n  echo-crate playlist <playlist-id>\n  echo-crate track <track-id>\n  echo-crate audio <track-id>\n  echo-crate lyrics <track-id>\n\nRead-only commands: providers, profile, search, preview, library, playlist, track, audio, lyrics.\nMutating commands: login, logout, import, sync.`;
+  return `EchoCrate CLI\n\nUsage:\n  echo-crate serve [--host 0.0.0.0] [--port 8787] [--data-dir ./data]\n  echo-crate providers\n  echo-crate profile [provider]\n  echo-crate login [provider]\n  echo-crate login-status <qr-key> [--provider <id>]\n  echo-crate logout [provider]\n  echo-crate search <query> [--provider <id>]\n  echo-crate preview <url> [--provider <id>]\n  echo-crate import <url> [--provider <id>]\n  echo-crate sync <playlist-id>\n  echo-crate library\n  echo-crate playlist <playlist-id>\n  echo-crate track <track-id>\n  echo-crate audio <track-id>\n  echo-crate lyrics <track-id>\n\nRead-only commands: providers, profile, search, preview, library, playlist, track, audio, lyrics.\nMutating commands: login, logout, import, sync.`;
 }
 
 function numberArg(value: string | undefined, label: string) {
@@ -25,6 +30,19 @@ function numberArg(value: string | undefined, label: string) {
 }
 
 async function run(args: Args) {
+  if (args.command === "serve") {
+    if (args.port) {
+      const port = Number(args.port);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("端口必须在 1 到 65535 之间");
+      process.env.PORT = String(port);
+    }
+    if (args.host) process.env.HOST = args.host;
+    if (args.dataDir) process.env.DATA_DIR = resolve(args.dataDir);
+    await import("./index.js");
+    return;
+  }
+  const { getTrack, listPlaylists, listTracks, playlistTracks } = await import("./db.js");
+  const { getProvider, listProviders, providerForInput } = await import("./providers.js");
   const providerId = args.provider || args.values[0] || "bilibili";
   switch (args.command) {
     case "providers": return { providers: await listProviders() };
@@ -95,7 +113,7 @@ async function run(args: Args) {
 
 const args = parseArgs(process.argv.slice(2));
 run(args).then((result) => {
-  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  if (result !== undefined) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }).catch((error) => {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;

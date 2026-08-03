@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { db, getTrack, listPlaylists, listTracks, playlistTracks } from "./db.js";
 import { getProvider, listProviders, providerForInput } from "./providers.js";
@@ -151,7 +152,8 @@ app.post<{ Params: { id: string }; Body: { content?: string } }>("/api/tracks/:i
   return { ok: true };
 });
 
-const staticRoot = join(process.cwd(), "dist");
+// Resolve relative to this installed module, not the caller's working directory.
+const staticRoot = join(fileURLToPath(new URL("..", import.meta.url)), "dist");
 if (existsSync(staticRoot)) {
   await app.register(fastifyStatic, { root: staticRoot, wildcard: false });
   app.get("/*", async (_request, reply) => reply.sendFile("index.html"));

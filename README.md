@@ -43,9 +43,20 @@ docker compose up -d --build
 
 从早期 Bilibili Music 版本升级时，服务会继续使用已有 `bilimusic.sqlite` 数据库，并自动添加通用 Provider 字段；新安装使用 `echocrate.sqlite`。
 
+### npm 自托管
+
+安装包本身包含前端静态资源、Fastify 服务与内置 Provider，不依赖 Docker。Node.js 需要 22.13 或更新版本：
+
+```bash
+npm install -g echo-crate
+echo-crate serve --host 127.0.0.1 --port 8787 --data-dir ./echo-crate-data
+```
+
+打开 `http://127.0.0.1:8787` 即可使用。`--data-dir` 保存 SQLite 音乐库和加密会话密钥，应使用持久目录并定期备份；省略时默认使用当前目录下的 `data/`。在反向代理后运行时可使用 `--host 0.0.0.0`。
+
 ## CLI：测试来源和获取结果
 
-CLI 直接复用服务端 Provider，不需要启动 Web 服务；输出均为 JSON，适合搭配 `jq` 检查。本地开发使用 `./bin/echo-crate`；执行一次 `npm link` 后可直接使用 `echo-crate`。发布后也可使用 `npx echo-crate`。
+CLI 直接复用服务端 Provider，不需要启动 Web 服务；输出均为 JSON，适合搭配 `jq` 检查。本地开发使用 `./bin/echo-crate`；执行一次 `npm link` 后可直接使用 `echo-crate`。发布后也可使用 `npx echo-crate`。`serve` 会启动完整 Web 服务，其余 CLI 命令不会启动服务。
 
 ```bash
 # 查看已注册来源和登录状态（只读）
