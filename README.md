@@ -56,7 +56,7 @@ echo-crate serve --host 127.0.0.1 --port 8787 --data-dir ./echo-crate-data
 
 ## npm 发布
 
-推送与 `package.json` 版本一致的标签（例如 `v0.2.0`）会由 GitHub Actions 自动执行测试、构建并发布到 npm。仓库需在 GitHub `npm` Environment（或仓库 Actions secrets）中设置 `NPM_TOKEN`；该 Token 需要目标包的发布权限。工作流启用了 provenance，建议同时在 npm 包设置中配置 GitHub Trusted Publisher。
+推送与 `package.json` 版本一致的标签（例如 `v0.2.1`）会由 GitHub Actions 自动执行测试、构建并发布到 npm。发布使用 npm Trusted Publisher（GitHub Actions OIDC）和 provenance，不需要在 GitHub 保存长期 npm Token。需在 npm 包设置中将 Trusted Publisher 绑定到本仓库的 `.github/workflows/publish-npm.yml`。
 
 ## CLI：测试来源和获取结果
 
