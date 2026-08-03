@@ -253,7 +253,7 @@ function App() {
         {tab === "settings" && <SettingsPage profile={profile} providers={providers} storage={storage} setProfile={setProfile} setProviders={setProviders} refreshStorage={refreshStorage} notify={notify} />}
       </main>
 
-      {current && <MiniPlayer track={current} playing={playing} progress={duration ? position / duration : 0} downloaded={downloadedIds.has(current.id)} onOpen={() => setPlayerOpen(true)} onPlay={togglePlay} onNext={() => move(1)} />}
+      {current && <MiniPlayer track={current} playing={playing} progress={duration ? position / duration : 0} downloaded={downloadedIds.has(current.id)} onOpen={() => setPlayerOpen(true)} onPlay={togglePlay} onFavorite={() => void favorite(current)} onNext={() => move(1)} />}
 
       <nav className="bottom-nav">
         {nav.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}><item.icon size={21} strokeWidth={tab === item.id ? 2.5 : 1.8} /><span>{item.label}</span></button>)}
@@ -373,8 +373,8 @@ function SettingsPage({ profile, providers, storage, setProfile, setProviders, r
   </>;
 }
 
-function MiniPlayer({ track, playing, progress, downloaded, onOpen, onPlay, onNext }: { track: Track; playing: boolean; progress: number; downloaded: boolean; onOpen: () => void; onPlay: () => void; onNext: () => void }) {
-  return <div className="mini-player"><div className="mini-progress" style={{ width: `${progress * 100}%` }} /><button className="mini-main" onClick={onOpen}><span className={`mini-cover ${playing ? "spinning" : ""}`} style={coverStyle(track)} /><span><strong>{track.title}</strong><small>{track.artist} {downloaded ? "· 本地" : "· 在线"}</small></span></button><button onClick={onPlay}>{playing ? <Pause size={21} fill="currentColor" /> : <Play size={21} fill="currentColor" />}</button><button onClick={onNext}><SkipForward size={21} fill="currentColor" /></button></div>;
+function MiniPlayer({ track, playing, progress, downloaded, onOpen, onPlay, onFavorite, onNext }: { track: Track; playing: boolean; progress: number; downloaded: boolean; onOpen: () => void; onPlay: () => void; onFavorite: () => void; onNext: () => void }) {
+  return <div className="mini-player"><div className="mini-progress" style={{ width: `${progress * 100}%` }} /><button className="mini-main" onClick={onOpen}><span className={`mini-cover ${playing ? "spinning" : ""}`} style={coverStyle(track)} /><span><strong>{track.title}</strong><small>{track.artist} {downloaded ? "· 本地" : "· 在线"}</small></span></button><button className={`mini-favorite ${track.favorite ? "liked" : ""}`} onClick={onFavorite} aria-label={track.favorite ? "取消收藏" : "收藏"}><Heart size={20} fill={track.favorite ? "currentColor" : "none"} /></button><button onClick={onPlay}>{playing ? <Pause size={21} fill="currentColor" /> : <Play size={21} fill="currentColor" />}</button><button onClick={onNext}><SkipForward size={21} fill="currentColor" /></button></div>;
 }
 
 function FullPlayer({ track, playing, position, duration, repeat, shuffle, speed, lyrics, queue, downloaded, sleepUntil, sleepAfterTrack, close, togglePlay, move, seek, toggleFavorite, setRepeat, setShuffle, setSpeed, download, setSleep, setSleepAfterTrack, removeFromQueue }: { track: Track; playing: boolean; position: number; duration: number; repeat: RepeatMode; shuffle: boolean; speed: number; lyrics: Array<{ from: number; to: number; content: string }>; queue: Track[]; downloaded: boolean; sleepUntil: number | null; sleepAfterTrack: boolean; close: () => void; togglePlay: () => void; move: (value: 1 | -1) => void; seek: (value: number) => void; toggleFavorite: () => void; setRepeat: (value: RepeatMode) => void; setShuffle: (value: boolean) => void; setSpeed: (value: number) => void; download: () => void; setSleep: (minutes: number) => void; setSleepAfterTrack: (value: boolean) => void; removeFromQueue: (id: number) => void }) {
