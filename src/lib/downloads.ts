@@ -3,6 +3,8 @@ import type { DownloadRecord } from "../types";
 
 const controllers = new Map<number, AbortController>();
 const CACHE = "echocrate-media-v1";
+const PREFETCH_CACHE = "echocrate-prebuffer-v1";
+const PREFETCH_BYTES = 1_572_864;
 
 async function opfsRoot() {
   return navigator.storage?.getDirectory?.();
@@ -113,4 +115,21 @@ export async function cleanupStorage(records: DownloadRecord[], favoriteIds = ne
     if (!next.quota || !next.usage || next.usage / next.quota < 0.75) break;
   }
   return removed;
+}
+
+/** Cache only the beginning of a likely next track so playback can start immediately. */
+export async function prebufferTrack(trackId: number) {
+  if (!navigator.onLine || !("caches" in window)) return;
+  const cache = await caches.open(PREFETCH_CACHE);
+  const key = `/__echocrate/prebuffer/${trackId}`;
+  if (await cache.match(key)) return;
+
+  const response = await fetch(`/api/tracks/${trackId}/audio`, {
+    headers: { Range: `bytes=0-${PREFETCH_BYTES - 1}` },
+  });
+  if (!response.ok) throw new Error("下一首预读失败");
+
+  // Retain only one likely-next prefix; this is intentionally not an offline download.
+  await Promise.all((await cache.keys()).map((request) => cache.delete(request)));
+  await cache.put(key, response);
 }

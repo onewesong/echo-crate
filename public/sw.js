@@ -1,5 +1,6 @@
 const SHELL = "echocrate-shell-v1";
 const MEDIA = "echocrate-media-v1";
+const PREFETCH = "echocrate-prebuffer-v1";
 const APP_SHELL = ["/", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
@@ -9,7 +10,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(Promise.all([
     self.clients.claim(),
-    caches.keys().then((keys) => Promise.all(keys.filter((key) => ![SHELL, MEDIA].includes(key)).map((key) => caches.delete(key)))),
+    caches.keys().then((keys) => Promise.all(keys.filter((key) => ![SHELL, MEDIA, PREFETCH].includes(key)).map((key) => caches.delete(key)))),
   ]));
 });
 
@@ -50,11 +51,20 @@ async function localMedia(request, trackId) {
   return rangeResponse(file, request);
 }
 
+async function prefetchedMedia(request, trackId) {
+  const range = request.headers.get("range");
+  // A prefix cannot satisfy a seek or a full offline request. It can only
+  // accelerate an initial request at byte zero; the browser requests later
+  // ranges from the streaming endpoint as playback advances.
+  if (range && !/^bytes=0-/.test(range)) return null;
+  return (await caches.open(PREFETCH)).match(`/__echocrate/prebuffer/${trackId}`);
+}
+
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   const trackId = trackIdFrom(url);
   if (trackId) {
-    event.respondWith((async () => (await localMedia(event.request, trackId)) || fetch(event.request))());
+    event.respondWith((async () => (await localMedia(event.request, trackId)) || (await prefetchedMedia(event.request, trackId)) || fetch(event.request))());
     return;
   }
   if (event.request.mode === "navigate") {

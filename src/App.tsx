@@ -7,7 +7,7 @@ import {
   WifiOff, X,
 } from "lucide-react";
 import { api } from "./lib/api";
-import { cleanupStorage, downloadTrack, pauseDownload, removeDownload } from "./lib/downloads";
+import { cleanupStorage, downloadTrack, pauseDownload, prebufferTrack, removeDownload } from "./lib/downloads";
 import { getDownloads, saveDownload } from "./lib/idb";
 import type { DownloadRecord, Playlist, ProviderProfile, RepeatMode, Tab, Track } from "./types";
 
@@ -70,6 +70,7 @@ function App() {
   const [sleepUntil, setSleepUntil] = useState<number | null>(null);
   const [sleepAfterTrack, setSleepAfterTrack] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const prebufferedTrackRef = useRef<number | null>(null);
 
   const current = library.tracks.find((track) => track.id === currentId) || null;
   const downloadedIds = useMemo(() => new Set(downloads.filter((item) => item.status === "complete").map((item) => item.trackId)), [downloads]);
@@ -180,6 +181,21 @@ function App() {
     if (next) playTrack(next, queue.map((id) => library.tracks.find((track) => track.id === id)).filter(Boolean) as Track[]);
   }, [currentId, library.tracks, playTrack, queue, repeat, shuffle]);
 
+  const prebufferNext = useCallback(() => {
+    if (!currentId || !queue.length || shuffle || repeat === "one") return;
+    const index = queue.indexOf(currentId);
+    if (index < 0) return;
+    let nextIndex = index + 1;
+    if (nextIndex >= queue.length) {
+      if (repeat !== "all") return;
+      nextIndex = 0;
+    }
+    const nextId = queue[nextIndex];
+    if (!nextId || nextId === currentId || prebufferedTrackRef.current === nextId) return;
+    prebufferedTrackRef.current = nextId;
+    void prebufferTrack(nextId).catch(() => { prebufferedTrackRef.current = null; });
+  }, [currentId, queue, repeat, shuffle]);
+
   useEffect(() => {
     if (!current || !("mediaSession" in navigator)) return;
     navigator.mediaSession.metadata = new MediaMetadata({
@@ -232,6 +248,7 @@ function App() {
         onTimeUpdate={(event) => {
           const time = event.currentTarget.currentTime;
           setPosition(time);
+          if (Number.isFinite(event.currentTarget.duration) && event.currentTarget.duration - time <= 30) prebufferNext();
           if (current && Math.floor(time) % 15 === 0) void api.history(current.id, time).catch(() => undefined);
           if ("mediaSession" in navigator && Number.isFinite(event.currentTarget.duration)) {
             try { navigator.mediaSession.setPositionState({ duration: event.currentTarget.duration, position: time, playbackRate: event.currentTarget.playbackRate }); } catch { /* transient metadata */ }
