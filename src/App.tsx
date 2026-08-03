@@ -228,6 +228,8 @@ function App() {
     try {
       const value = await api.favorite(track.id);
       setLibrary((old) => ({ ...old, tracks: old.tracks.map((item) => item.id === track.id ? { ...item, favorite: value.favorite } : item) }));
+      setQueue((old) => old.map((item) => !isRemoteTrack(item) && item.id === track.id ? { ...item, favorite: value.favorite } : item));
+      setCurrent((old) => old && !isRemoteTrack(old) && old.id === track.id ? { ...old, favorite: value.favorite } : old);
     } catch (error) { notify((error as Error).message); }
   };
 
