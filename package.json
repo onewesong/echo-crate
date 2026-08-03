@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": false,
   "bin": {
-    "echo-crate": "./bin/echo-crate"
+    "echo-crate": "bin/echo-crate"
   },
   "files": [
     "bin",
