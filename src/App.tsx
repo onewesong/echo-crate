@@ -33,7 +33,13 @@ function bytes(value: number) {
 }
 
 function coverStyle(track?: Pick<PlayableTrack, "cover"> | Playlist, index = 0) {
-  const cover = track?.cover;
+  const cover = track?.cover ? (() => {
+    try {
+      const url = new URL(track.cover.startsWith("//") ? `https:${track.cover}` : track.cover);
+      if (url.hostname.endsWith(".hdslb.com")) url.protocol = "https:";
+      return url.toString();
+    } catch { return track.cover; }
+  })() : "";
   return cover
     ? { backgroundImage: `linear-gradient(180deg, transparent 45%, rgba(5,4,10,.7)), url(${cover})` }
     : { background: `linear-gradient(145deg, ${ACCENT[index % ACCENT.length]}, #17141f 76%)` };
@@ -64,6 +70,8 @@ function App() {
   }, []);
   const [queue, setQueue] = useState<PlayableTrack[]>([]);
   const [current, setCurrent] = useState<PlayableTrack | null>(null);
+  // Keep an already-buffered search stream while its result is saved to the library.
+  const [streamToken, setStreamToken] = useState<string | null>(null);
   const [repeat, setRepeat] = useState<RepeatMode>(savedPlayer.repeat || "off");
   const [shuffle, setShuffle] = useState(Boolean(savedPlayer.shuffle));
   const [playing, setPlaying] = useState(false);
@@ -167,6 +175,7 @@ function App() {
     if (!isRemoteTrack(track) && !online && !downloadedIds.has(track.id)) { notify("这首歌尚未离线保存"); return; }
     if (isRemoteTrack(track) && !online) { notify("搜索点播需要网络连接"); return; }
     setQueue(list);
+    setStreamToken(isRemoteTrack(track) ? track.token : null);
     setCurrent(track);
     setPosition(0);
     window.setTimeout(() => audioRef.current?.play().catch(() => notify("点击播放键开始播放")), 0);
@@ -258,7 +267,7 @@ function App() {
     <div className="app-shell">
       <audio
         ref={audioRef}
-        src={current ? isRemoteTrack(current) ? `/api/search/results/${current.token}/audio` : `/api/tracks/${current.id}/audio` : undefined}
+        src={current ? streamToken ? `/api/search/results/${streamToken}/audio` : `/api/tracks/${current.id}/audio` : undefined}
         preload="metadata"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}

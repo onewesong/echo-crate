@@ -82,8 +82,20 @@ function extractBvid(input: string) {
   return input.match(/BV[0-9A-Za-z]{10}/)?.[0];
 }
 
+function normalizeCover(url: string) {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url.startsWith("//") ? `https:${url}` : url);
+    if (parsed.hostname.endsWith(".hdslb.com")) parsed.protocol = "https:";
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 async function fetchVideo(bvid: string): Promise<BiliVideo> {
-  return biliJson<BiliVideo>(`${API}/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`);
+  const video = await biliJson<BiliVideo>(`${API}/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`);
+  return { ...video, pic: normalizeCover(video.pic) };
 }
 
 type ImportResult = { playlist: Playlist; imported: number };
@@ -168,7 +180,7 @@ async function loadSource(input: string): Promise<LoadedSource> {
         has_more: boolean;
       }>(`${API}/x/v3/fav/resource/list?media_id=${favoriteId}&pn=${page}&ps=20&platform=web`);
       title = data.info.title;
-      cover = data.info.cover;
+      cover = normalizeCover(data.info.cover);
       for (const media of data.medias || []) {
         try { videos.push(await fetchVideo(media.bvid)); } catch { /* deleted/private item */ }
       }
@@ -193,7 +205,7 @@ async function loadSource(input: string): Promise<LoadedSource> {
       title = data.meta.name;
       for (const archive of data.archives || []) videos.push(await fetchVideo(archive.bvid));
       if (videos.length >= data.page.total) {
-        return { title, cover: data.meta.cover, sourceType: "collection", sourceId: seasonId, sourceUrl: value, videos };
+        return { title, cover: normalizeCover(data.meta.cover), sourceType: "collection", sourceId: seasonId, sourceUrl: value, videos };
       }
       page += 1;
     }
