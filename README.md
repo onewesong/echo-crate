@@ -54,6 +54,10 @@ echo-crate serve --host 127.0.0.1 --port 8787 --data-dir ./echo-crate-data
 
 打开 `http://127.0.0.1:8787` 即可使用。`--data-dir` 保存 SQLite 音乐库和加密会话密钥，应使用持久目录并定期备份；省略时默认使用当前目录下的 `data/`。在反向代理后运行时可使用 `--host 0.0.0.0`。
 
+## npm 发布
+
+推送与 `package.json` 版本一致的标签（例如 `v0.2.0`）会由 GitHub Actions 自动执行测试、构建并发布到 npm。仓库需在 GitHub `npm` Environment（或仓库 Actions secrets）中设置 `NPM_TOKEN`；该 Token 需要目标包的发布权限。工作流启用了 provenance，建议同时在 npm 包设置中配置 GitHub Trusted Publisher。
+
 ## CLI：测试来源和获取结果
 
 CLI 直接复用服务端 Provider，不需要启动 Web 服务；输出均为 JSON，适合搭配 `jq` 检查。本地开发使用 `./bin/echo-crate`；执行一次 `npm link` 后可直接使用 `echo-crate`。发布后也可使用 `npx echo-crate`。`serve` 会启动完整 Web 服务，其余 CLI 命令不会启动服务。
