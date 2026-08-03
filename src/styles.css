@@ -66,7 +66,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .track-actions button, .download-row > button { background: transparent; color: var(--muted); padding: 8px; }
 .liked { color: var(--accent) !important; }
 
-.bottom-nav { position: fixed; z-index: 20; bottom: 0; left: 50%; transform: translateX(-50%); width: min(100%, 760px); height: calc(69px + env(safe-area-inset-bottom)); padding: 7px 12px env(safe-area-inset-bottom); background: rgba(16,14,23,.92); backdrop-filter: blur(22px); border-top: 1px solid rgba(255,255,255,.08); display: grid; grid-template-columns: repeat(4, 1fr); }
+.bottom-nav { position: fixed; z-index: 20; bottom: 0; left: 50%; transform: translateX(-50%); width: min(100%, 760px); height: calc(69px + env(safe-area-inset-bottom)); padding: 7px 12px env(safe-area-inset-bottom); background: rgba(16,14,23,.92); backdrop-filter: blur(22px); border-top: 1px solid rgba(255,255,255,.08); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .bottom-nav button { background: transparent; color: #777282; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 9px; }
 .bottom-nav button.active { color: #ff8262; }
 .mini-player { position: fixed; z-index: 21; bottom: calc(69px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: min(calc(100% - 20px), 740px); height: 64px; border: 1px solid rgba(255,255,255,.09); background: rgba(31,27,40,.95); backdrop-filter: blur(20px); border-radius: 17px 17px 5px 5px; display: flex; align-items: center; padding: 8px 8px 8px 9px; box-shadow: 0 -12px 35px rgba(0,0,0,.25); overflow: hidden; }
