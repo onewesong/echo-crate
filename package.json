@@ -2,6 +2,16 @@
   "name": "echo-crate",
   "version": "0.2.0",
   "private": false,
+  "bin": {
+    "echo-crate": "./bin/echo-crate"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "dist-server",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "engines": {
     "node": ">=22.13.0"
@@ -11,6 +21,7 @@
     "dev:client": "vite --host 0.0.0.0",
     "build": "vite build && tsc -p server/tsconfig.json",
     "start": "node dist-server/index.js",
+    "prepack": "npm run build",
     "test": "node --test --experimental-strip-types tests/*.test.ts",
     "typecheck": "tsc --noEmit && tsc -p server/tsconfig.json --noEmit"
   },

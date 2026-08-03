@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+set -eu
+
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+if [ -f "$ROOT_DIR/dist-server/cli.js" ]; then
+  exec node "$ROOT_DIR/dist-server/cli.js" "$@"
+fi
+
+if [ -x "$ROOT_DIR/node_modules/.bin/tsx" ]; then
+  exec "$ROOT_DIR/node_modules/.bin/tsx" "$ROOT_DIR/server/cli.ts" "$@"
+fi
+
+printf '%s\n' 'EchoCrate CLI is not built. Run: npm install && npm run build' >&2
+exit 1

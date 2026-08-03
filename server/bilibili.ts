@@ -84,11 +84,19 @@ async function fetchVideo(bvid: string): Promise<BiliVideo> {
 }
 
 type ImportResult = { playlist: Playlist; imported: number };
+type LoadedSource = {
+  title: string;
+  cover: string;
+  sourceType: "favorite" | "collection" | "video";
+  sourceId: string;
+  sourceUrl: string;
+  videos: BiliVideo[];
+};
 
 function upsertPlaylist(input: Omit<Playlist, "id" | "lastSyncedAt">) {
   db.prepare(`INSERT INTO playlists(title, cover, provider, source_type, source_id, source_url, item_count)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(source_type, source_id) DO UPDATE SET
+    ON CONFLICT(provider, source_type, source_id) DO UPDATE SET
       title=excluded.title, cover=excluded.cover, source_url=excluded.source_url,
       provider=excluded.provider, item_count=excluded.item_count, last_synced_at=CURRENT_TIMESTAMP`).run(
         input.title, input.cover, input.provider, input.sourceType, input.sourceId, input.sourceUrl, input.itemCount,
@@ -102,7 +110,7 @@ function saveVideos(playlistId: number, videos: BiliVideo[]) {
   for (const video of videos) {
     for (const page of video.pages) {
       const sourceKey = `${video.bvid}:${page.cid}`;
-      const title = video.pages.length > 1 ? `${video.title} · ${page.part}` : video.title;
+      const title = video.pages.length > 1 ? `${page.part} · ${video.title}` : video.title;
       const sourceRef = JSON.stringify({ provider: BILIBILI_PROVIDER_ID, resourceId: video.bvid, itemId: String(page.cid), metadata: { page: page.page } });
       db.prepare(`INSERT INTO tracks(source_key, provider, source_ref, bvid, cid, page, title, artist, cover, duration)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -129,20 +137,18 @@ function mapPlaylist(row: Record<string, unknown>): Playlist {
   };
 }
 
-export async function importSource(input: string): Promise<ImportResult> {
+async function loadSource(input: string): Promise<LoadedSource> {
   const value = input.trim();
   const initialUrl = new URL(value);
   if (initialUrl.hostname === "b23.tv") {
     const resolved = await fetch(value, { redirect: "follow", headers: { "user-agent": USER_AGENT } });
     if (!resolved.url.includes("bilibili.com")) throw new Error("短链接没有指向 Bilibili 内容");
-    return importSource(resolved.url);
+    return loadSource(resolved.url);
   }
   const bvid = extractBvid(value);
   if (bvid) {
     const video = await fetchVideo(bvid);
-    const row = upsertPlaylist({ title: video.title, cover: video.pic, provider: BILIBILI_PROVIDER_ID, sourceType: "video", sourceId: bvid, sourceUrl: value, itemCount: video.pages.length });
-    const imported = saveVideos(Number(row.id), [video]);
-    return { playlist: mapPlaylist({ ...row, item_count: imported }), imported };
+    return { title: video.title, cover: video.pic, sourceType: "video", sourceId: bvid, sourceUrl: value, videos: [video] };
   }
 
   const url = initialUrl;
@@ -166,9 +172,7 @@ export async function importSource(input: string): Promise<ImportResult> {
       if (!data.has_more) break;
       page += 1;
     }
-    const row = upsertPlaylist({ title, cover, provider: BILIBILI_PROVIDER_ID, sourceType: "favorite", sourceId: favoriteId, sourceUrl: value, itemCount: videos.length });
-    const imported = saveVideos(Number(row.id), videos);
-    return { playlist: mapPlaylist({ ...row, item_count: imported }), imported };
+    return { title, cover, sourceType: "favorite", sourceId: favoriteId, sourceUrl: value, videos };
   }
 
   const seasonId = url.searchParams.get("sid") || url.searchParams.get("season_id") || url.pathname.match(/\/lists\/(\d+)/)?.[1];
@@ -186,14 +190,47 @@ export async function importSource(input: string): Promise<ImportResult> {
       title = data.meta.name;
       for (const archive of data.archives || []) videos.push(await fetchVideo(archive.bvid));
       if (videos.length >= data.page.total) {
-        const row = upsertPlaylist({ title, cover: data.meta.cover, provider: BILIBILI_PROVIDER_ID, sourceType: "collection", sourceId: seasonId, sourceUrl: value, itemCount: videos.length });
-        const imported = saveVideos(Number(row.id), videos);
-        return { playlist: mapPlaylist({ ...row, item_count: imported }), imported };
+        return { title, cover: data.meta.cover, sourceType: "collection", sourceId: seasonId, sourceUrl: value, videos };
       }
       page += 1;
     }
   }
   throw new Error("暂不识别这个链接，请使用 BV 视频、收藏夹或空间合集链接");
+}
+
+function previewTracks(videos: BiliVideo[]) {
+  return videos.flatMap((video) => video.pages.map((page) => ({
+    title: video.pages.length > 1 ? `${page.part} · ${video.title}` : video.title,
+    artist: video.owner.name,
+    cover: video.pic,
+    duration: page.duration || video.duration,
+    source: { provider: BILIBILI_PROVIDER_ID, resourceId: video.bvid, itemId: String(page.cid), metadata: { page: page.page } },
+  })));
+}
+
+/** Read metadata and split video parts without changing the local library. */
+export async function previewSource(input: string) {
+  const loaded = await loadSource(input);
+  const tracks = previewTracks(loaded.videos);
+  return {
+    playlist: {
+      title: loaded.title, cover: loaded.cover, provider: BILIBILI_PROVIDER_ID,
+      sourceType: loaded.sourceType, sourceId: loaded.sourceId, sourceUrl: loaded.sourceUrl,
+      itemCount: tracks.length,
+    },
+    tracks,
+  };
+}
+
+export async function importSource(input: string): Promise<ImportResult> {
+  const loaded = await loadSource(input);
+  const row = upsertPlaylist({
+    title: loaded.title, cover: loaded.cover, provider: BILIBILI_PROVIDER_ID,
+    sourceType: loaded.sourceType, sourceId: loaded.sourceId, sourceUrl: loaded.sourceUrl,
+    itemCount: loaded.videos.length,
+  });
+  const imported = saveVideos(Number(row.id), loaded.videos);
+  return { playlist: mapPlaylist({ ...row, item_count: imported }), imported };
 }
 
 export async function syncPlaylist(id: number) {

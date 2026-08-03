@@ -4,6 +4,7 @@ import {
   createQrLogin,
   getProfile,
   importSource as importBilibiliSource,
+  previewSource as previewBilibiliSource,
   logout,
   pollQrLogin,
   resolveAudio,
@@ -21,6 +22,7 @@ export type MusicProvider = {
   accepts(input: string): boolean;
   profile(): Promise<ProviderProfile["profile"]>;
   importSource(input: string): ReturnType<typeof importBilibiliSource>;
+  previewSource(input: string): ReturnType<typeof previewBilibiliSource>;
   syncPlaylist(id: number): ReturnType<typeof syncBilibiliPlaylist>;
   resolveAudio(source: SourceRef): ReturnType<typeof resolveAudio>;
   resolveLyrics(source: SourceRef): ReturnType<typeof resolveLyrics>;
@@ -39,6 +41,7 @@ const bilibili: MusicProvider = {
     return profile ? { name: profile.name, avatar: profile.avatar, id: profile.mid } : null;
   },
   importSource: importBilibiliSource,
+  previewSource: previewBilibiliSource,
   syncPlaylist: syncBilibiliPlaylist,
   resolveAudio: (source) => resolveAudio(source.resourceId, Number(source.itemId)),
   resolveLyrics: (source) => resolveLyrics(source.resourceId, Number(source.itemId)),

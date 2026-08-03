@@ -43,6 +43,35 @@ docker compose up -d --build
 
 从早期 Bilibili Music 版本升级时，服务会继续使用已有 `bilimusic.sqlite` 数据库，并自动添加通用 Provider 字段；新安装使用 `echocrate.sqlite`。
 
+## CLI：测试来源和获取结果
+
+CLI 直接复用服务端 Provider，不需要启动 Web 服务；输出均为 JSON，适合搭配 `jq` 检查。本地开发使用 `./bin/echo-crate`；执行一次 `npm link` 后可直接使用 `echo-crate`。发布后也可使用 `npx echo-crate`。
+
+```bash
+# 查看已注册来源和登录状态（只读）
+./bin/echo-crate providers
+./bin/echo-crate profile bilibili
+
+# 生成登录二维码；复制返回的 key 后轮询登录状态
+./bin/echo-crate login bilibili
+./bin/echo-crate login-status '<qr-key>' --provider bilibili
+
+# 导入和同步会写入 SQLite 音乐库
+./bin/echo-crate import 'https://www.bilibili.com/video/BV...'
+./bin/echo-crate sync 1
+
+# 只读取歌单和分 P，不写入 SQLite
+./bin/echo-crate preview 'https://www.bilibili.com/video/BV...'
+
+# 检查已保存的库、曲目，以及来源返回的临时音频地址/歌词
+./bin/echo-crate library
+./bin/echo-crate track 1
+./bin/echo-crate audio 1
+./bin/echo-crate lyrics 1
+```
+
+`audio` 的输出含有短时有效的播放 URL，请不要将其上传到公开日志或 Issue。
+
 ## 数据与边界
 
 - 服务端只保存音乐库、历史、加密会话与来源引用，不建立音频仓库。
