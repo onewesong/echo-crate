@@ -302,17 +302,23 @@ function TrackList({ tracks, downloadedIds, onPlay, extra }: { tracks: Track[]; 
 
 function LibraryPage({ library, query, setQuery, downloadedIds, playTrack, favorite, download, sync, openImport }: { library: LibrarySnapshot; query: string; setQuery: (value: string) => void; downloadedIds: Set<number>; playTrack: (track: Track, list?: Track[]) => void; favorite: (track: Track) => void; download: (id: number) => void; sync: (id: number) => void; openImport: () => void }) {
   const [selected, setSelected] = useState<number | null>(null);
+  const [filter, setFilter] = useState<"all" | "favorite" | "offline">("all");
   const [selectedTracks, setSelectedTracks] = useState<Track[]>([]);
   useEffect(() => {
     if (selected === null) { setSelectedTracks([]); return; }
     void api.playlistTracks(selected).then((value) => setSelectedTracks(value.tracks)).catch(() => setSelectedTracks([]));
   }, [selected, library.tracks]);
   const baseTracks = selected === null ? library.tracks : selectedTracks;
-  const filtered = query.trim() ? baseTracks.filter((track) => `${track.title} ${track.artist}`.toLowerCase().includes(query.toLowerCase())) : baseTracks;
+  const filtered = baseTracks.filter((track) => {
+    if (filter === "favorite" && !track.favorite) return false;
+    if (filter === "offline" && !downloadedIds.has(track.id)) return false;
+    const needle = query.trim().toLowerCase();
+    return !needle || `${track.title} ${track.artist}`.toLowerCase().includes(needle);
+  });
   return <>
     <div className="page-title"><div><p className="eyebrow">你的收藏</p><h1>音乐库</h1></div><button className="round-button" onClick={openImport}><Plus size={22} /></button></div>
     <label className="search-box"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索歌曲或创作者" />{query && <button onClick={() => setQuery("")}><X size={16} /></button>}</label>
-    <div className="filter-pills"><button className={selected === null ? "active" : ""} onClick={() => setSelected(null)}>全部歌曲 <span>{library.tracks.length}</span></button><button>收藏 <span>{library.tracks.filter((track) => track.favorite).length}</span></button><button>离线 <span>{downloadedIds.size}</span></button></div>
+    <div className="filter-pills"><button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>全部歌曲 <span>{baseTracks.length}</span></button><button className={filter === "favorite" ? "active" : ""} onClick={() => setFilter("favorite")}>收藏 <span>{baseTracks.filter((track) => track.favorite).length}</span></button><button className={filter === "offline" ? "active" : ""} onClick={() => setFilter("offline")}>离线 <span>{baseTracks.filter((track) => downloadedIds.has(track.id)).length}</span></button></div>
     <SectionHeader title="我的歌单" />
     <div className="library-playlists">{library.playlists.map((playlist, index) => <button className={`library-playlist ${selected === playlist.id ? "selected" : ""}`} key={playlist.id} onClick={() => setSelected(selected === playlist.id ? null : playlist.id)}><span className="small-cover" style={coverStyle(playlist, index)} /><span><strong>{playlist.title}</strong><small>{playlist.itemCount} 首 · {playlist.provider === "bilibili" ? "Bilibili" : playlist.provider}</small></span><span className="sync-button" onClick={(event) => { event.stopPropagation(); void sync(playlist.id); }}><RefreshCw size={16} /></span></button>)}</div>
     <SectionHeader title={selected ? library.playlists.find((item) => item.id === selected)?.title || "歌单" : "全部歌曲"} action={selected ? "下载全部" : `${filtered.length} 首`} onClick={selected ? () => filtered.filter((track) => !downloadedIds.has(track.id)).forEach((track) => void download(track.id)) : undefined} />
