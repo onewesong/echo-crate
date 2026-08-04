@@ -72,7 +72,11 @@ function App() {
   const [current, setCurrent] = useState<PlayableTrack | null>(null);
   // Keep an already-buffered search stream while its result is saved to the library.
   const [streamToken, setStreamToken] = useState<string | null>(null);
-  const [repeat, setRepeat] = useState<RepeatMode>(savedPlayer.repeat || "off");
+  // Legacy clients stored "off" as the old default. New queues loop by default,
+  // while an explicit user choice remains persistent.
+  const legacyRepeat = savedPlayer.repeat as RepeatMode | undefined;
+  const [repeat, setRepeat] = useState<RepeatMode>(savedPlayer.repeatConfigured || legacyRepeat === "all" || legacyRepeat === "one" ? legacyRepeat || "all" : "all");
+  const [repeatConfigured, setRepeatConfigured] = useState(Boolean(savedPlayer.repeatConfigured));
   const [shuffle, setShuffle] = useState(Boolean(savedPlayer.shuffle));
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(Number(savedPlayer.position || 0));
@@ -93,6 +97,11 @@ function App() {
   const notify = useCallback((message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 2600);
+  }, []);
+
+  const setRepeatMode = useCallback((value: RepeatMode) => {
+    setRepeat(value);
+    setRepeatConfigured(true);
   }, []);
 
   const refreshStorage = useCallback(async () => {
@@ -126,9 +135,9 @@ function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const timer = window.setTimeout(() => localStorage.setItem("echocrate.player", JSON.stringify({ repeat, shuffle, position })), 500);
+    const timer = window.setTimeout(() => localStorage.setItem("echocrate.player", JSON.stringify({ repeat, repeatConfigured, shuffle, position })), 500);
     return () => clearTimeout(timer);
-  }, [repeat, shuffle, position]);
+  }, [repeat, repeatConfigured, shuffle, position]);
 
   useEffect(() => {
     if (!current) { setLyrics([]); return; }
@@ -314,7 +323,7 @@ function App() {
       </nav>
 
       {importOpen && <ImportSheet providers={providers} onClose={() => setImportOpen(false)} onDone={async (message) => { setImportOpen(false); await refresh(); notify(message); }} notify={notify} />}
-      {playerOpen && current && <FullPlayer track={current} playing={playing} position={position} duration={duration || current.duration} repeat={repeat} shuffle={shuffle} speed={speed} lyrics={lyrics} queue={queue} downloaded={!isRemoteTrack(current) && downloadedIds.has(current.id)} sleepUntil={sleepUntil} sleepAfterTrack={sleepAfterTrack} close={() => setPlayerOpen(false)} togglePlay={togglePlay} move={move} seek={(value) => { if (audioRef.current) audioRef.current.currentTime = value; }} toggleFavorite={() => void toggleFavorite(current)} setRepeat={setRepeat} setShuffle={setShuffle} setSpeed={setSpeed} download={() => { if (!isRemoteTrack(current)) void startDownload(current.id); else notify("收藏后即可下载"); }} setSleep={(minutes) => { setSleepAfterTrack(false); setSleepUntil(minutes ? Date.now() + minutes * 60_000 : null); }} setSleepAfterTrack={setSleepAfterTrack} removeFromQueue={(item) => setQueue((old) => old.filter((value) => trackKey(value) !== trackKey(item)))} />}
+      {playerOpen && current && <FullPlayer track={current} playing={playing} position={position} duration={duration || current.duration} repeat={repeat} shuffle={shuffle} speed={speed} lyrics={lyrics} queue={queue} downloaded={!isRemoteTrack(current) && downloadedIds.has(current.id)} sleepUntil={sleepUntil} sleepAfterTrack={sleepAfterTrack} close={() => setPlayerOpen(false)} togglePlay={togglePlay} move={move} seek={(value) => { if (audioRef.current) audioRef.current.currentTime = value; }} toggleFavorite={() => void toggleFavorite(current)} setRepeat={setRepeatMode} setShuffle={setShuffle} setSpeed={setSpeed} download={() => { if (!isRemoteTrack(current)) void startDownload(current.id); else notify("收藏后即可下载"); }} setSleep={(minutes) => { setSleepAfterTrack(false); setSleepUntil(minutes ? Date.now() + minutes * 60_000 : null); }} setSleepAfterTrack={setSleepAfterTrack} removeFromQueue={(item) => setQueue((old) => old.filter((value) => trackKey(value) !== trackKey(item)))} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
