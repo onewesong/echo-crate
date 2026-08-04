@@ -2,6 +2,14 @@
   "name": "echo-crate",
   "version": "0.2.1",
   "private": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/onewesong/echo-crate"
+  },
+  "bugs": {
+    "url": "https://github.com/onewesong/echo-crate/issues"
+  },
+  "homepage": "https://github.com/onewesong/echo-crate#readme",
   "bin": {
     "echo-crate": "bin/echo-crate"
   },
