@@ -1,6 +1,6 @@
 {
   "name": "echo-crate",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "bin": {
     "echo-crate": "bin/echo-crate"
