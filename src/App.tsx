@@ -106,7 +106,7 @@ function App() {
       setLibrary(value);
       localStorage.setItem("echocrate.library", JSON.stringify(value));
     } catch (error) {
-      if (!library.tracks.length) notify((error as Error).message);
+      notify((error as Error).message);
     } finally { setLoading(false); }
   }, [library.tracks.length, notify]);
 
@@ -116,7 +116,7 @@ function App() {
     void api.providers().then((value) => {
       setProviders(value.providers);
       setProfile(value.providers.find((item) => item.id === "bilibili")?.profile || null);
-    }).catch(() => undefined);
+    }).catch((error) => notify(`音乐来源加载失败：${(error as Error).message}`));
     void refreshStorage();
     const onOnline = () => setOnline(true);
     const onOffline = () => setOnline(false);
@@ -136,8 +136,11 @@ function App() {
       if (value.lines) setLyrics(value.lines);
       else if (value.content) setLyrics(parseLrc(value.content));
       else setLyrics([]);
-    }).catch(() => setLyrics([]));
-  }, [current ? trackKey(current) : null]);
+    }).catch((error) => {
+      setLyrics([]);
+      if (isRemoteTrack(current)) notify((error as Error).message);
+    });
+  }, [current ? trackKey(current) : null, notify]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -178,7 +181,9 @@ function App() {
     setStreamToken(isRemoteTrack(track) ? track.token : null);
     setCurrent(track);
     setPosition(0);
-    window.setTimeout(() => audioRef.current?.play().catch(() => notify("点击播放键开始播放")), 0);
+    window.setTimeout(() => audioRef.current?.play().catch(() => {
+      if (!audioRef.current?.error) notify("播放被浏览器阻止，请点击播放按钮");
+    }), 0);
   }, [downloadedIds, library.tracks, notify, online]);
 
   const move = useCallback((direction: 1 | -1) => {
@@ -282,7 +287,11 @@ function App() {
           }
         }}
         onEnded={onEnded}
-        onError={() => current && notify(online ? "音频来源暂时不可用" : "本地缓存读取失败")}
+        onError={() => {
+          if (!current) return;
+          if (streamToken) notify("临时搜索结果已过期或无法播放，请重新搜索后再试");
+          else notify(online ? "音频来源暂时不可用" : "本地缓存读取失败");
+        }}
       />
 
       <header className="topbar">
@@ -293,7 +302,7 @@ function App() {
       <main className="content">
         {tab === "home" && <HomePage library={library} loading={loading} downloadedIds={downloadedIds} playTrack={playTrack} setTab={setTab} openFavorites={() => { setLibraryFilter("favorite"); setTab("library"); }} openImport={() => setImportOpen(true)} />}
         {tab === "search" && <SearchPage providers={providers} playTrack={playTrack} favorite={toggleFavorite} />}
-        {tab === "library" && <LibraryPage library={library} query={query} setQuery={setQuery} filter={libraryFilter} setFilter={setLibraryFilter} downloadedIds={downloadedIds} playTrack={playTrack} favorite={favorite} download={startDownload} sync={async (id) => { try { await api.sync(id); await refresh(); notify("歌单已同步"); } catch (error) { notify((error as Error).message); } }} openImport={() => setImportOpen(true)} />}
+        {tab === "library" && <LibraryPage library={library} query={query} setQuery={setQuery} filter={libraryFilter} setFilter={setLibraryFilter} downloadedIds={downloadedIds} playTrack={playTrack} favorite={favorite} download={startDownload} sync={async (id) => { try { await api.sync(id); await refresh(); notify("歌单已同步"); } catch (error) { notify((error as Error).message); } }} openImport={() => setImportOpen(true)} notify={notify} />}
         {tab === "downloads" && <DownloadsPage records={downloads} tracks={library.tracks} storage={storage} pause={pauseDownload} retry={startDownload} remove={async (id) => { await removeDownload(id); setDownloads(await getDownloads()); await refreshStorage(); }} togglePin={async (record) => { const next = { ...record, pinned: !record.pinned }; await saveDownload(next); setDownloads(await getDownloads()); }} playTrack={playTrack} />}
         {tab === "settings" && <SettingsPage profile={profile} providers={providers} storage={storage} setProfile={setProfile} setProviders={setProviders} refreshStorage={refreshStorage} notify={notify} />}
       </main>
@@ -389,13 +398,13 @@ function SearchPage({ providers, playTrack, favorite }: { providers: ProviderPro
   </>;
 }
 
-function LibraryPage({ library, query, setQuery, filter, setFilter, downloadedIds, playTrack, favorite, download, sync, openImport }: { library: LibrarySnapshot; query: string; setQuery: (value: string) => void; filter: LibraryFilter; setFilter: (value: LibraryFilter) => void; downloadedIds: Set<number>; playTrack: (track: Track, list?: Track[]) => void; favorite: (track: Track) => void; download: (id: number) => void; sync: (id: number) => void; openImport: () => void }) {
+function LibraryPage({ library, query, setQuery, filter, setFilter, downloadedIds, playTrack, favorite, download, sync, openImport, notify }: { library: LibrarySnapshot; query: string; setQuery: (value: string) => void; filter: LibraryFilter; setFilter: (value: LibraryFilter) => void; downloadedIds: Set<number>; playTrack: (track: Track, list?: Track[]) => void; favorite: (track: Track) => void; download: (id: number) => void; sync: (id: number) => void; openImport: () => void; notify: (message: string) => void }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedTracks, setSelectedTracks] = useState<Track[]>([]);
   useEffect(() => {
     if (selected === null) { setSelectedTracks([]); return; }
-    void api.playlistTracks(selected).then((value) => setSelectedTracks(value.tracks)).catch(() => setSelectedTracks([]));
-  }, [selected, library.tracks]);
+    void api.playlistTracks(selected).then((value) => setSelectedTracks(value.tracks)).catch((error) => { setSelectedTracks([]); notify((error as Error).message); });
+  }, [selected, library.tracks, notify]);
   const baseTracks = selected === null ? library.tracks : selectedTracks;
   const filtered = baseTracks.filter((track) => {
     if (filter === "favorite" && !track.favorite) return false;
@@ -450,7 +459,7 @@ function SettingsPage({ profile, providers, storage, setProfile, setProviders, r
     <div className="page-title"><div><p className="eyebrow">个人空间</p><h1>设置</h1></div><Settings size={30} /></div>
     <SectionHeader title="音乐来源" />
     <section className="setting-card account-card">
-      {profile ? <><img src={profile.avatar} alt="Bilibili 头像" /><div><strong>{profile.name}</strong><span>UID {profile.id} · 会话已加密保存</span></div><button onClick={async () => { await api.logout("bilibili"); setProfile(null); void api.providers().then((next) => setProviders(next.providers)); }}><LogOut size={18} /></button></> : <><span className="account-icon"><UserRound size={25} /></span><div><strong>Bilibili 未连接</strong><span>连接后可读取私人收藏夹</span></div><button className="small-primary" onClick={() => void beginLogin()}>扫码绑定</button></>}
+      {profile ? <><img src={profile.avatar} alt="Bilibili 头像" /><div><strong>{profile.name}</strong><span>UID {profile.id} · 会话已加密保存</span></div><button onClick={async () => { try { await api.logout("bilibili"); setProfile(null); const next = await api.providers(); setProviders(next.providers); } catch (error) { notify((error as Error).message); } }}><LogOut size={18} /></button></> : <><span className="account-icon"><UserRound size={25} /></span><div><strong>Bilibili 未连接</strong><span>连接后可读取私人收藏夹</span></div><button className="small-primary" onClick={() => void beginLogin()}>扫码绑定</button></>}
     </section>
     {qr && <div className="qr-card"><button className="qr-close" onClick={() => setQr(null)}><X size={18} /></button><img src={qr.image} alt="Bilibili 登录二维码" /><strong>{status}</strong><span>登录凭据只保存在你的 WanLab 服务端</span></div>}
     <section className="provider-summary">{providers.filter((item) => item.id !== "bilibili").length ? providers.filter((item) => item.id !== "bilibili").map((item) => <div key={item.id}><span className="setting-icon purple"><Music2 size={19} /></span><span><strong>{item.name}</strong><small>{item.description}</small></span></div>) : <div><span className="setting-icon purple"><Plus size={19} /></span><span><strong>更多来源即将接入</strong><small>EchoCrate 通过 Provider 插件扩展本地音乐、WebDAV 与媒体服务器。</small></span></div>}</section>
